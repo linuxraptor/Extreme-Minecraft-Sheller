@@ -47,7 +47,7 @@ MCPID=$(pgrep -f minecraft_server);
 if [[ -n $MCPID ]]
 	# If pgrep returns anything with string length greater than 0...
 	then
-		MCPORT=$(lsof -i 4 -a -p $MCPID | awk 'NR==2' | awk '{ print $(NF-1) }' |  awk -F':' '{ print $2 }');
+		MCPORT=$( lsof -i 4 -a -p $MCPID | awk 'NR==2' | awk '{ print $(NF-1) }' |  awk -F':' '{ print $2 }' | awk -F'-' '{print $1}' );
 		# Then set active minecraft internet port by parsing lsof output.
 	else
 	# If pgrep returns nothing...
@@ -119,12 +119,59 @@ fi
 
 function sync()
 {
-	echo "Issuing save commands."
-	screen -p $SCREEN_NAME -X stuff "$(printf "save-on\r")" && sleep 1
-	screen -p $SCREEN_NAME -X stuff "$(printf "save-all\r")" && sleep 1
-	screen -p $SCREEN_NAME -X stuff "$(printf "save-off\r")" && sleep 1
-	rsync -ravuP --delete --force "$VOLATILE" "$PERMANENT"
-	screen -p $SCREEN_NAME -X stuff "$(printf "say RAM sync complete.\r")"
+echo "Issuing save commands."
+screen -p $SCREEN_NAME -X stuff "$(printf "save-on\r")" && sleep 1
+screen -p $SCREEN_NAME -X stuff "$(printf "save-all\r")" && sleep 1
+screen -p $SCREEN_NAME -X stuff "$(printf "save-off\r")" && sleep 1
+rsync -ravuP --delete --force "$VOLATILE" "$PERMANENT"
+screen -p $SCREEN_NAME -X stuff "$(printf "say RAM sync complete.\r")"
+}
+
+function smartsync()
+{
+if [[ -a /tmp/connected.status ]]
+then
+	if [[ CONNECTION==1 ]]
+	then
+		echo -e "Connection established with: $PLAYERS, sync recommended."
+	fi
+        echo -e "There has been connection since the last sync."
+        echo "Issuing save commands."
+        screen -p $SCREEN_NAME -X stuff "$(printf "save-on\r")" && sleep 1
+        screen -p $SCREEN_NAME -X stuff "$(printf "save-all\r")" && sleep 1
+        screen -p $SCREEN_NAME -X stuff "$(printf "save-off\r")" && sleep 1
+        rsync -ravuP --delete --force "$VOLATILE" "$PERMANENT"
+        screen -p $SCREEN_NAME -X stuff "$(printf "say RAM sync complete.\r")"
+	rm /tmp/connected.status
+else
+        echo -e "Sync status is current."
+	screen -p $SCREEN_NAME -X stuff "$(printf "Sync status current.\r")"
+fi
+}
+
+function connectioncheck()
+{
+
+PLAYERS=$( netstat -an  inet | grep 25565 | grep ESTABLISHED |  awk '{print $5}' |  awk -F: '{print $1}' );
+
+if [[ -n $PLAYERS ]]
+        then
+        CONNECTION==1 # Unnecessary because of connected.status file, but neat to see live output
+        touch /tmp/connected.status
+        echo -e "Connection established with: $PLAYERS, sync recommended."
+else
+	CONNECTION==0
+        echo -e "Server empty, checking previous state."
+        if [[ -a /tmp/connected.status ]]
+                then
+                echo -e "There has been connection since the last sync."
+                # The connection.status file will remain there until the server does a smartsync. The smartsync will remove it.
+        else
+                echo -e "Sync status is current."
+        fi
+fi
+
+
 }
 
 function prepare_backup()
@@ -241,6 +288,14 @@ if [[ $# -gt 0 ]]
 			##############
                         "sync")
                                 sync;
+                                ;;
+                        ##############
+                        "smartsync")
+                                connectioncheck && smartsync;
+                                ;;
+                        ##############
+                        "connectioncheck")
+                                connectioncheck;
                                 ;;
                         ##############
 			*)
