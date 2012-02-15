@@ -134,6 +134,8 @@ then
 	if [[ CONNECTION==1 ]]
 	then
 		echo -e "Connection established with: $PLAYERS, sync recommended."
+	else
+		echo -e "No players currently connected."
 	fi
         echo -e "There has been connection since the last sync."
         echo "Issuing save commands."
@@ -142,10 +144,20 @@ then
         screen -p $SCREEN_NAME -X stuff "$(printf "save-off\r")" && sleep 1
         rsync -ravuP --delete --force "$VOLATILE" "$PERMANENT"
         screen -p $SCREEN_NAME -X stuff "$(printf "say RAM sync complete.\r")"
-	rm /tmp/connected.status
+
+	PLAYERS=$( netstat -an  inet | grep 25565 | grep ESTABLISHED |  awk '{print $5}' |  awk -F: '{print $1}' );
+	if [[ -n $PLAYERS ]]
+	        then
+	        CONNECTION==1 # Unnecessary because of connected.status file, but neat to see live output
+	        echo -e "Connection still alive."
+	else
+	        CONNECTION==0
+		rm /tmp/connected.status
+	fi
+
 else
-        echo -e "Sync status is current."
-	screen -p $SCREEN_NAME -X stuff "$(printf "Sync status current.\r")"
+        echo -e $DATE "[INFO] Sync status is current."
+	screen -p $SCREEN_NAME -X stuff "$(printf "say Sync status current.\r")"
 fi
 }
 
@@ -156,9 +168,16 @@ PLAYERS=$( netstat -an  inet | grep 25565 | grep ESTABLISHED |  awk '{print $5}'
 
 if [[ -n $PLAYERS ]]
         then
-        CONNECTION==1 # Unnecessary because of connected.status file, but neat to see live output
-        touch /tmp/connected.status
+	if [[ -a /tmp/connected.status  ]]
+	then
+	        CONNECTION==1 # Unnecessary because of connected.status file, but neat to see live output
+	else
+	        touch /tmp/connected.status
+		CONNECTION==1
+		screen -p $SCREEN_NAME -X stuff "$(printf "say User $PLAYERS presence logged.\r")"
+	fi
         echo -e "Connection established with: $PLAYERS, sync recommended."
+
 else
 	CONNECTION==0
         echo -e "Server empty, checking previous state."
@@ -291,7 +310,8 @@ if [[ $# -gt 0 ]]
                                 ;;
                         ##############
                         "smartsync")
-                                connectioncheck && smartsync;
+                                smartsync;
+#                                connectioncheck && smartsync; # This isn't necessary because the script already calls it when searching for "CONNECTED" variable!
                                 ;;
                         ##############
                         "connectioncheck")
