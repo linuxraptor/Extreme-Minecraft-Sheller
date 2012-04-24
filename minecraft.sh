@@ -6,18 +6,28 @@
 # separate directories.                                        #
 ################################################################
 
+# Script to run Minecraft
+
+# Load minecraft world file into RAM for a low latency server from 
 STARTUP="mcRAM.sh"
-SYNC="world-backup.sh"
-BACKUP="remote-backup.sh"
+
+# Minecraft.net
+# java -Xmx1024M -Xms1024M -jar minecraft_server.jar nogui
+#STARTUP="mc.sh" 
+
+# Automatic backup directory
 BACKUP_DIR="/home/minecraft/automatic_backups/"
+
+# Backup file limit
 MAX_BACKUP_FILES=6
+# Backup size limit
 MAX_BACKUP_DIR_SIZE_MB=200
 
 # For syncing
 VOLATILE="/home/minecraft/World_in_RAM/"
 PERMANENT="/home/minecraft/world_storage/"
 SCREEN_NAME="Minecraft"
-# For syncing
+# End For syncing
 
 #Path to your world folder
 WORLD="/home/minecraft/world_storage/"
@@ -34,10 +44,14 @@ BACKUP_FULL_LINK=${BACKUP_PATH}/${WORLD_NAME}_full.tgz
 
 SCRIPT_NAME="minecraft.sh"
 
-#Remote host info
+# Remote host info
 #rsync -ravu --delete --force $BACKUP_PATH root@192.168.1.136:$BACKUP_PATH
+
 USERNAME="root";
-LOCATION="192.168.1.136";
+
+# Your IP address to backup the minecraft world remotely 
+LOCATION="192.168.1.3";
+
 
 #######################################################
 # Please don't mess with anything beyond this point.  #
