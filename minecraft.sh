@@ -15,11 +15,12 @@ STARTUP="mcRAM.sh"
 # java -Xmx1024M -Xms1024M -jar minecraft_server.jar nogui
 #STARTUP="mc.sh" 
 
-
-SYNC="world-backup.sh"
-BACKUP="remote-backup.sh"
+# Automatic backup directory
 BACKUP_DIR="/home/minecraft/automatic_backups/"
+
+# Backup file limit
 MAX_BACKUP_FILES=6
+# Backup size limit
 MAX_BACKUP_DIR_SIZE_MB=200
 
 # For syncing
