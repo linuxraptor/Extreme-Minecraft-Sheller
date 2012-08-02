@@ -27,8 +27,7 @@ SERVER_JAR=minecraft_server.jar
 # You can optionally change these, but it isnt necessary. #
 ###########################################################
 
-#BACKUP_PATH=$(pwd)/automatic_backups
-BACKUP_PATH=/mnt/harddrive1/chris/AppleMinecraft/automatic_backups
+BACKUP_PATH=$(pwd)/automatic_backups
 MAX_BACKUP_FILES=6
 MAX_BACKUP_PATH_SIZE_MB=2000
 
@@ -228,9 +227,10 @@ kill -15 $$) &
 ########################
 # END of java subshell #
 ########################
-
+sleep 5
 LEAD_PID=$$
 MCPID=$(pgrep -lf $SERVER | awk -F' ' '{print $1}' && sleep 1)
+sleep 1
 MCPORT=$( lsof -i 4 -a -p $MCPID | awk 'NR==2' | awk '{ print $(NF-1) }' |  awk -F':' '{ print $2 }' | awk -F'-' '{print $1}' )
 DATE=$(date +'%Y-%m-%d %X')
 CONNECTIONFILE=/tmp/$MCPID.status
