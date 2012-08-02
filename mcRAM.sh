@@ -27,8 +27,7 @@ SERVER_JAR=minecraft_server.jar
 # You can optionally change these, but it isnt necessary. #
 ###########################################################
 
-#BACKUP_PATH=$(pwd)/automatic_backups
-BACKUP_PATH=/mnt/harddrive1/chris/AppleMinecraft/automatic_backups
+BACKUP_PATH=$(pwd)/automatic_backups
 MAX_BACKUP_FILES=6
 MAX_BACKUP_PATH_SIZE_MB=2000
 
