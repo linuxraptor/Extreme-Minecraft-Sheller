@@ -303,7 +303,8 @@ while [[ -n $(pgrep -fl $0 | grep $LEAD_PID) ]];do
                         exit 1 #FAIL :(
                 fi
         fi
-        DATE=$(date +%Y-%m-%d-%Hh%M)
+	unset existingbackups;
+	DATE=$(date +%Y-%m-%d-%Hh%M)
         BACKUP_FILENAME=$SERVER_PROPERTIES_WORLD-$DATE-full.tgz
         tar -czhf $BACKUP_PATH/$BACKUP_FILENAME $WORLD >/dev/null 2&>1
         rm -f $BACKUP_FULL_LINK
