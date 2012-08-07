@@ -1,17 +1,16 @@
 #!/bin/bash
-# Title: MCRAM
-# Author: Koodough, Linuxraptor
-# NO WARRANTIES YOU CREEPER
+##############################################################
+# Title: MCRAM                                               #
+# Author: Linuxraptor                                        #
+# Contributors: Koodough, Crunchmuffin                       #
+# NO WARRANTIES YOU CREEPER                                  #
+# Place this file in the folder where minecraft server lies. #
+##############################################################
 
-# From minecraft.sh startup script
-# screen -dmS $SCREEN_NAME java -server -Xmx${MEMMAX}M -Xms${MEMALOC}M -Djava.net.preferIPv4Stack=true $SERVER_OPTIONS -jar minecraft_server.jar nogui
-#
-# From backup script - searching for the screen to command.
-# screen -S $SCREEN_NAME -p 0 -X stuff "$(printf "say Backing up the map in 10s\r")"
+##############################################################
+#        Choose the server that you currently use.           #
+##############################################################
 
-# INSTALL
-# Place this file in the folder where minecraft server lies.
-#To see the console of the minecraft server type "screen -xRRA" in terminal
 
 #SERVER_JAR=craftbukkit-0.0.1-SNAPSHOT.jar
 SERVER_JAR=minecraft_server.jar
@@ -23,17 +22,17 @@ SERVER_JAR=minecraft_server.jar
 
 
 
-###########################################################
-# You can optionally change these, but it isnt necessary. #
-###########################################################
+##############################################################
+#  You can optionally change these, but it isnt necessary.   #
+##############################################################
 
 BACKUP_PATH=$(pwd)/automatic_backups
 MAX_BACKUP_FILES=6
-MAX_BACKUP_PATH_SIZE_MB=2000
+MAX_BACKUP_PATH_SIZE_MB=100
 
-##############################################
-### Don't Change Anything Below this point ###
-##############################################
+##############################################################
+####        Don't Change Anything Below this point        ####
+##############################################################
 
 
 if [[ $# -gt 0 ]]
@@ -140,7 +139,9 @@ if [ "$V" == yes ];
 	else rsync -ravuq $VOLATILE/ $WORLD
 fi
 
-if [ $(file world | awk -F' ' {'print $2'}) == directory ];
+if [ $(file $VOLATILE | awk -F' ' {'print $2'}) == directory ];
+	# If minecraft is stopped correctly, "world" will be a directory. If not, it will still be a symlink.
+	# This looks at the filetype and determines if the old backups need to remain due to an incorrect termination.
 	then
 		OLD_BACKUPS=$VOLATILE"-backup-*" # I have to do this stupid shit because using the expression directly
 		rm -rf $OLD_BACKUPS              # in rm causes the wildcard to be ignored.
@@ -187,9 +188,9 @@ cd $WORLD_DIRNAME
 echo "Linking $VOLATILE to $WORLD_IN_RAM" > $TTY
 ln -s $WORLD_IN_RAM $VOLATILE
 
-#if [ "$V" == yes ]; then
-#	echo "Starting perminent minecraft world $WORLD with RAM link to $VOLATILE." > $TTY
-#fi
+if [ "$V" == yes ]; then
+	echo "Starting perminent minecraft world $WORLD with RAM link to $VOLATILE." > $TTY
+fi
 
 rm -f $WORLD_DIRNAME/*.pipe
 PIPE=$SERVER_PROPERTIES_WORLD-$(date --rfc-3339=ns | awk -F. '{print $2}').pipe
@@ -198,8 +199,10 @@ mkfifo $PIPE
 # BENNING of java subshell #
 ############################
 tail -f $PIPE | $(java -server -Xms2048M -Xmx2048M -Djava.net.preferIPv4Stack=true -jar $SERVER nogui > /dev/null
-# Pipe to dev null because java output overflows into BASH sometimes, it needs to stay in the pipeline.
+# Pipe to dev null because the first few lines  of java output overflow into BASH
+# and it should to stay in the pipeline.
 sleep 3
+# I HATE sleep statements but it's needed to prevent file collisions.
 if [ "$V" == yes ];
 	then
 		echo "Syncing RAM and permanent storage."
@@ -231,6 +234,8 @@ sleep 5
 LEAD_PID=$$
 MCPID=$(pgrep -lf $SERVER | awk -F' ' '{print $1}' && sleep 1)
 sleep 1
+# MCPID needs to be padded with sleep statements or it becomes seriously unstable. I'm not too bothered by this;
+# it only gets called once.
 MCPORT=$( lsof -i 4 -a -p $MCPID | awk 'NR==2' | awk '{ print $(NF-1) }' |  awk -F':' '{ print $2 }' | awk -F'-' '{print $1}' )
 DATE=$(date +'%Y-%m-%d %X')
 CONNECTIONFILE=/tmp/$MCPID.status
@@ -310,12 +315,10 @@ while [[ -n $(pgrep -fl $0 | grep $LEAD_PID) ]];do
         rm -f $BACKUP_FULL_LINK
         ln -s $BACKUP_FILENAME $BACKUP_FULL_LINK
 	echo "say -Backup synchronization complete." > $PIPE
+	renice -n -10 -p $MCPID >/dev/null 2>&1
 	sleep 10800
 done &
 
 while read input; do
 	echo $input > $PIPE
 done
-
-#Reniceing helps the soul, just like a bowl of chicken soup.
-# renice -n -10 -p `ps -e | grep java | awk '{ print $1 }'`
