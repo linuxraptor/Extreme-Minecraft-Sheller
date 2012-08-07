@@ -1,13 +1,9 @@
 HIGHLIGHTS:
 
-* No perminent changes to the system. Can switch between this script and any other minecraft startup method.
-
+* No permanent changes to the system. Can switch between this script and any other minecraft startup method.
 * Large performance enhancements.
-
 * Automatic backups in several locations.
-
 * Automatic recovery in event of system failure.
-
 * Automatic retrieval of minecraft_server.jar.
 
 
