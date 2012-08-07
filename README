@@ -8,25 +8,23 @@ HIGHLIGHTS:
 
 * Automatic recovery in event of system failure.
 
-* Automatic retrieval of minecarft_server.jar.
+* Automatic retrieval of minecraft_server.jar.
 
 
 DEPENDENCIES:
 
 * 1GB of RAM
-* Linux.
+* Linux kernel 2.6.x or newer.
 * Java runtime environment of any kind (Sun JRE, Icedtea) later than 1.6
 
 
 WHAT'S THE BIG IDEA?
 
-Just start it. 
+"Just start it."
 
-That was my entire drive to make this script.
+The need for simplicity drove me to write this script; I wanted a script that I could run and not worry about editing all kinds of variables or remembering long java commands for optimization.
 
-I wanted a script that I could run and not worry about editing all kinds of variables or remembering long java commands for optimization.
-
-No bullshit. Just a working script that manages, well, everything. Automatically.
+No bullshit. Just a working script that manages, well, everything. ... Automatically.
 
 
 WHAT DOES IT DO?
@@ -40,3 +38,8 @@ The RAM syncronizes deltas to the hard drive folder only when users have visited
 When the script is halted softly by entering "stop" into minecraft, it leaves the minecraft world files on the hard drive such that minecraft can be started vallila-style (java -jar minecarft_server.jar).
 
 Upon system failure, the script can recover the minecraft server and world. Using several automatic backup systems, no information is ever lost beyond 4 minutes and 56 seconds.
+
+
+TODO:
+
+Automatic console redirection for lost shells (i.e., logout).
