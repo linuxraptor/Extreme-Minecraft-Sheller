@@ -198,11 +198,50 @@ mkfifo $PIPE
 ############################
 # BENNING of java subshell #
 ############################
-tail -f $PIPE | $(java -server -Xms2048M -Xmx2048M -Djava.net.preferIPv4Stack=true -jar $SERVER nogui > /dev/null
-# Pipe to dev null because the first few lines  of java output overflow into BASH
-# and it should to stay in the pipeline.
+# tail -f $PIPE | $(java -server -Xms2048M -Xmx2048M -Djava.net.preferIPv4Stack=true -jar $SERVER nogui > $TTY
+
+# rem IntelliJ's suggested options for 64-bit java.exe
+# set /E /S JAVA_OPTIONS=-Xms128m -Xmx750m -XX:MaxPermSize=350m -XX:ReservedCodeCacheSize=96m -ea -Dsun.io.useCanonCaches=false -Djava.net.preferIPv4Stack=true -Djsse.enableSNIExtension=false -$
+# http://mindprod.com/jgloss/javaexe.html#JAVAOPTIONS
+# http://java-latte.blogspot.in/2014/03/metaspace-in-java-8.html
+# jstat program can be used to monitor jre performance: https://www.java.net/node/692654
+# still investigating "ReservedCodeCacheSize", ive been told this param can hurt more than it helps in newer java, where dynamic allocation works well:
+# http://stackoverflow.com/questions/7513185/what-are-reservedcodecachesize-and-initialcodecachesize
+# sun.io.useCanonCaches=false - disable problematic caches, ensure compatibility with new garbage collection
+# jsse.enableSNIExtension=false - disable problematic SSL implementation
+# parallel garbage collection! we still use "stop-the-world" garbage collection because the "concurrent" options can decrease performance by 40%.
+# with "stop-the-world" garbage collection we can still keep pauses below 100ms.
+# http://stackoverflow.com/questions/2101518/difference-between-xxuseparallelgc-and-xxuseparnewgc
+# https://themindstorms.wordpress.com/2009/01/21/advanced-jvm-tuning-for-low-pause/
+# https://blogs.oracle.com/jonthecollector/entry/our_collectors
+
+# -Dcom.sun.management.jmxremote.port=55555
+# this allows for remote java management console plug-ins. good for performance tweaking.
+# JMX management controlled by these local files:
+# /opt/oracle-jre-bin-1.8.0.45/lib/management/jmxremote.access (check out this file for help, it is thorough)
+# /opt/oracle-jre-bin-1.8.0.45/lib/management/jmxremote.password (this file will not exist yet)
+# more info here:
+# https://jazz.net/help-dev/clm/index.jsp?re=1&topic=/com.ibm.jazz.repository.web.admin.doc/topics/t_server_mon_tomcat_option2.html&scope=null
+
+tail -f $PIPE | $(
+	java \
+	-server \
+	-Xms2048M \
+	-Xmx2048M \
+	-ea \
+	-XX:+UseG1GC \
+	-XX:+UseStringDeduplication \
+	-XX:+DisableExplicitGC \
+	-XX:MetaspaceSize=85M \
+	-Djava.net.preferIPv4Stack=true-ea \
+	-Djava.net.preferIPv4Addresses \
+	-Dsun.io.useCanonCaches=false \
+	-Djsse.enableSNIExtension=false \
+	-jar $SERVER nogui > $TTY
+
 sleep 3
-# I HATE sleep statements but it's needed to prevent file collisions.
+# I HATE sleep statements but it's needed to prevent file collisions. Minecraft or java will claim to be terminated when files are still being modified.
+# I spent a while lowering this as much as possible while retaining its dependability.
 if [ "$V" == yes ];
 	then
 		echo "Syncing RAM and permanent storage."
@@ -240,7 +279,7 @@ MCPORT=$( lsof -i 4 -a -p $MCPID | awk 'NR==2' | awk '{ print $(NF-1) }' |  awk 
 DATE=$(date +'%Y-%m-%d %X')
 CONNECTIONFILE=/tmp/$MCPID.status
 
-while [[ -n $(pgrep -fl $0 | grep $LEAD_PID) ]];do
+while [[ -n $(pgrep -f $0 | grep $LEAD_PID) ]];do
    # connection check
 	PLAYERS=$( netstat -an  inet | grep $MCPORT | grep ESTABLISHED |  awk '{print $5}' |  awk -F: '{print $1}' );
 	if [[ -n $PLAYERS ]]
@@ -256,10 +295,18 @@ while [[ -n $(pgrep -fl $0 | grep $LEAD_PID) ]];do
 	else
 	        CONNECTION==0
 	fi
-	sleep 60
+
+	# This could be cleaned up, no need for PID checks at the beginning AND end of the loop.
+        SECONDS_TO_SLEEP=60;
+        for (( i=0; i<$SECONDS_TO_SLEEP; i++ )); do
+                sleep 1;
+                if [[ ! -n $(pgrep -f $0 | grep $LEAD_PID) ]]; then
+                        exit 0;
+                fi
+        done
 done &
 
-while [[ -n $(pgrep -fl $0 | grep $LEAD_PID) ]];do
+while [[ -n $(pgrep -f $0 | grep $LEAD_PID) ]];do
    # smart sync
 	if [[ -a $CONNECTIONFILE ]]
 	then
@@ -277,7 +324,15 @@ while [[ -n $(pgrep -fl $0 | grep $LEAD_PID) ]];do
 	                rm $CONNECTIONFILE
 	        fi
 	fi
-	sleep 300
+
+        # This could be cleaned up, no need for PID checks at the beginning AND end of the loop.
+        SECONDS_TO_SLEEP=300;
+        for (( i=0; i<$SECONDS_TO_SLEEP; i++ )); do
+                sleep 1;
+                if [[ ! -n $(pgrep -f $0 | grep $LEAD_PID) ]]; then
+                        exit 0;
+                fi
+        done
 done &
 
 while [[ -n $(pgrep -fl $0 | grep $LEAD_PID) ]];do
@@ -316,7 +371,15 @@ while [[ -n $(pgrep -fl $0 | grep $LEAD_PID) ]];do
         ln -s $BACKUP_FILENAME $BACKUP_FULL_LINK
 	echo "say -Backup synchronization complete." > $PIPE
 	renice -n -10 -p $MCPID >/dev/null 2>&1
-	sleep 10800
+
+        # This could be cleaned up, no need for PID checks at the beginning AND end of the loop.
+        SECONDS_TO_SLEEP=10800;
+        for (( i=0; i<$SECONDS_TO_SLEEP; i++ )); do
+                sleep 1;
+                if [[ ! -n $(pgrep -f $0 | grep $LEAD_PID) ]]; then
+                        exit 0;
+                fi
+        done
 done &
 
 while read input; do
