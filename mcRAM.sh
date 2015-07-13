@@ -30,6 +30,22 @@ BACKUP_PATH=$(pwd)/automatic_backups
 MAX_BACKUP_FILES=6
 MAX_BACKUP_PATH_SIZE_MB=100
 
+
+
+##############################################################
+#                          TODO                              #
+##############################################################
+
+# Maybe turn this into perl, it's getting nasty and desperately needs regex instead of awk.
+# ...Even if it isnt perl, it still needs regex instead of awk.
+# Clean up greps
+# Find more efficient PID tracking method that doesnt require pgrep | grep several times per second.
+# Consider real logging method where all output is passed upwards but filtered last minute by designation.
+# 	perhaps integrate real log levels like debug, notice, warning, and error.
+# Make an array of files necessary to access to check permissions quickly and with far less code.
+# Remove initial minecraft setup attempts, it is far too broken. Replace with quick java subshell that waits and closes.
+# 	Perhaps edit eula, but really, it should be removed maintaining it is a lot of work and minecraft server is constantly changing version names.
+
 ##############################################################
 ####        Don't Change Anything Below this point        ####
 ##############################################################
@@ -135,8 +151,8 @@ fi
 fi
 
 if [ "$V" == yes ];
-	then rsync -ravu $VOLATILE/ $WORLD  > $TTY
-	else rsync -ravuq $VOLATILE/ $WORLD
+	then rsync -rav $VOLATILE/ $WORLD  > $TTY
+	else rsync -ravq $VOLATILE/ $WORLD
 fi
 
 if [ $(file $VOLATILE | awk -F' ' {'print $2'}) == directory ];
@@ -245,8 +261,8 @@ sleep 3
 if [ "$V" == yes ];
 	then
 		echo "Syncing RAM and permanent storage."
-		rsync -ravuP --delete --force "$WORLD_IN_RAM/" "$WORLD"
-	else rsync -ravuPq --delete --force "$WORLD_IN_RAM/" "$WORLD"
+		rsync -ravP --delete --force "$WORLD_IN_RAM/" "$WORLD"
+	else rsync -ravPq --delete --force "$WORLD_IN_RAM/" "$WORLD"
 fi
 rm -rf $VOLATILE
 if ! mkdir -p $VOLATILE; then
@@ -256,8 +272,8 @@ fi
 if [ "$V" == yes ];
         then
 		echo "Restoring original world location"
-		rsync -ravu --delete --force $WORLD_IN_RAM/ $VOLATILE
-        else rsync -ravuq --delete --force $WORLD_IN_RAM/ $VOLATILE
+		rsync -rav --delete --force $WORLD_IN_RAM/ $VOLATILE
+        else rsync -ravq --delete --force $WORLD_IN_RAM/ $VOLATILE
 fi
 
 rm -rf $WORLD_IN_RAM
@@ -271,13 +287,14 @@ kill -15 $$) &
 ########################
 sleep 5
 LEAD_PID=$$
-MCPID=$(pgrep -lf $SERVER | awk -F' ' '{print $1}' && sleep 1)
+MCPID=$(pgrep -f $SERVER && sleep 1)
 sleep 1
 # MCPID needs to be padded with sleep statements or it becomes seriously unstable. I'm not too bothered by this;
 # it only gets called once.
 MCPORT=$( lsof -i 4 -a -p $MCPID | awk 'NR==2' | awk '{ print $(NF-1) }' |  awk -F':' '{ print $2 }' | awk -F'-' '{print $1}' )
 DATE=$(date +'%Y-%m-%d %X')
 CONNECTIONFILE=/tmp/$MCPID.status
+BACKUP_SINCE_USER_CONNECTION=/tmp/$MCPID.recentbackup
 
 while [[ -n $(pgrep -f $0 | grep $LEAD_PID) ]];do
    # connection check
@@ -289,6 +306,7 @@ while [[ -n $(pgrep -f $0 | grep $LEAD_PID) ]];do
 	                CONNECTION==1 # Unnecessary because of connected.status file, but neat to see live output
 	        else
 	                touch $CONNECTIONFILE
+			touch $BACKUP_SINCE_USER_CONNECTION
 	                CONNECTION==1
 			echo "say User presence logged" > $PIPE
 		fi
@@ -313,7 +331,8 @@ while [[ -n $(pgrep -f $0 | grep $LEAD_PID) ]];do
 		echo "save-on" > $PIPE
 		echo "save-all" > $PIPE
 		echo "save-off" > $PIPE
-		rsync -ravuq --delete --force "$WORLD_IN_RAM/" "$WORLD"
+		# Think about keeping saving on all the time and only disabling it immediately before a sync.
+		rsync -ravq --delete --force "$WORLD_IN_RAM/" "$WORLD"
 		echo "say RAM Sync complete." > $PIPE
 	        PLAYERS=$( netstat -an  inet | grep $MCPORT | grep ESTABLISHED |  awk '{print $5}' |  awk -F: '{print $1}' );
 	        if [[ -n $PLAYERS ]]
@@ -335,51 +354,65 @@ while [[ -n $(pgrep -f $0 | grep $LEAD_PID) ]];do
         done
 done &
 
-while [[ -n $(pgrep -fl $0 | grep $LEAD_PID) ]];do
-   # force sync and backup
-        echo "save-on" > $PIPE
-        echo "save-all" > $PIPE
-        echo "save-off" > $PIPE
-        rsync -ravuq --delete --force "$WORLD_IN_RAM/" "$WORLD"
-        echo "say RAM Sync complete." > $PIPE
-        SIZE_IN_BYTES=$(du -s $BACKUP_PATH | awk '{ print $1 }');
-        MAX_BYTE_SIZE=$((1000 * $MAX_BACKUP_PATH_SIZE_MB));
-        POTENTIAL_SIZE=$(($(du -s $BACKUP_PATH | awk '{ print $1 }') + $(du -s $VOLATILE | awk '{ print $1 }')));
-        declare -a existingbackups
-        for f in $(echo $(find $BACKUP_PATH -size +1M | sort -g))
-	        do
-                existingbackups=( "${existingbackups[@]}" "$f" );
-        done
-        while [[ $POTENTIAL_SIZE -gt $MAX_BYTE_SIZE && -n ${existingbackups[0]} ]]
-	        do
-                rm ${existingbackups[0]};
-                unset existingbackups[0];
-                existingbackups=( "${existingbackups[@]}" );
-                POTENTIAL_SIZE=$(($(du -s $BACKUP_PATH | awk '{ print $1 }') + $(du -s $WORLD_IN_RAM | awk '{ print $1 }')));
-        done
-        if [[ ! -d $BACKUP_PATH  ]]; then
-                if ! mkdir -p $BACKUP_PATH; then
-                        echo "Backup path $BACKUP_PATH does not exist and I could not create the directory! Permissions maybe?" > $TTY
-                        exit 1 #FAIL :(
-                fi
-        fi
-	unset existingbackups;
-	DATE=$(date +%Y-%m-%d-%Hh%M)
-        BACKUP_FILENAME=$SERVER_PROPERTIES_WORLD-$DATE-full.tgz
-        tar -czhf $BACKUP_PATH/$BACKUP_FILENAME $WORLD >/dev/null 2>&1
-        rm -f $BACKUP_FULL_LINK
-        ln -s $BACKUP_FILENAME $BACKUP_FULL_LINK
-	echo "say -Backup synchronization complete." > $PIPE
-	renice -n -10 -p $MCPID >/dev/null 2>&1
+while [[ -n $(pgrep -f $0 | grep $LEAD_PID) ]];do
 
-        # This could be cleaned up, no need for PID checks at the beginning AND end of the loop.
-        SECONDS_TO_SLEEP=10800;
-        for (( i=0; i<$SECONDS_TO_SLEEP; i++ )); do
-                sleep 1;
-                if [[ ! -n $(pgrep -f $0 | grep $LEAD_PID) ]]; then
-                        exit 0;
-                fi
-        done
+	if [[ -a $BACKUP_SINCE_USER_CONNECTION ]]
+		# force sync and backup
+	        echo "save-on" > $PIPE
+	        echo "save-all" > $PIPE
+	        echo "save-off" > $PIPE
+	        rsync -ravq --delete --force "$WORLD_IN_RAM/" "$WORLD"
+	        echo "say RAM Sync complete." > $PIPE
+	        SIZE_IN_BYTES=$(du -s $BACKUP_PATH | awk '{ print $1 }');
+	        MAX_BYTE_SIZE=$((1000 * $MAX_BACKUP_PATH_SIZE_MB));
+	        POTENTIAL_SIZE=$(($(du -s $BACKUP_PATH | awk '{ print $1 }') + $(du -s $VOLATILE | awk '{ print $1 }')));
+	        declare -a existingbackups
+	        for f in $(echo $(find $BACKUP_PATH -size +1M | sort -g))
+		        do
+	                existingbackups=( "${existingbackups[@]}" "$f" );
+	        done
+	        while [[ $POTENTIAL_SIZE -gt $MAX_BYTE_SIZE && -n ${existingbackups[0]} ]]
+		        do
+	                rm ${existingbackups[0]};
+	                unset existingbackups[0];
+	                existingbackups=( "${existingbackups[@]}" );
+	                POTENTIAL_SIZE=$(($(du -s $BACKUP_PATH | awk '{ print $1 }') + $(du -s $WORLD_IN_RAM | awk '{ print $1 }')));
+	        done
+	        if [[ ! -d $BACKUP_PATH  ]]; then
+	                if ! mkdir -p $BACKUP_PATH; then
+	                        echo "Backup path $BACKUP_PATH does not exist and I could not create the directory! Permissions maybe?" > $TTY
+	                        exit 1 #FAIL :(
+	                fi
+	        fi
+		unset existingbackups;
+		DATE=$(date +%Y-%m-%d-%Hh%M)
+	        BACKUP_FILENAME=$SERVER_PROPERTIES_WORLD-$DATE-full.tgz
+	        tar -czhf $BACKUP_PATH/$BACKUP_FILENAME $WORLD >/dev/null 2>&1
+	        rm -f $BACKUP_FULL_LINK
+	        ln -s $BACKUP_FILENAME $BACKUP_FULL_LINK
+		echo "say -Backup synchronization complete.-" > $PIPE
+		rm $BACKUP_SINCE_USER_CONNECTION
+		renice -n -10 -p $MCPID >/dev/null 2>&1
+
+	        # This could be cleaned up, no need for PID checks at the beginning AND end of the loop.
+	        SECONDS_TO_SLEEP=10800;
+	        for (( i=0; i<$SECONDS_TO_SLEEP; i++ )); do
+	                sleep 1;
+	                if [[ ! -n $(pgrep -f $0 | grep $LEAD_PID) ]]; then
+	                        exit 0;
+	                fi
+	        done
+
+	else
+	        # This could be cleaned up, no need for PID checks at the beginning AND end of the loop.
+	        SECONDS_TO_SLEEP=10800;
+	        for (( i=0; i<$SECONDS_TO_SLEEP; i++ )); do
+	                sleep 1;
+	                if [[ ! -n $(pgrep -f $0 | grep $LEAD_PID) ]]; then
+	                        exit 0;
+	                fi
+	        done
+	fi
 done &
 
 while read input; do
