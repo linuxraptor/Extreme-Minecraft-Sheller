@@ -356,7 +356,7 @@ done &
 
 while [[ -n $(pgrep -f $0 | grep $LEAD_PID) ]];do
 
-	if [[ -a $BACKUP_SINCE_USER_CONNECTION ]]
+	if [[ -a $BACKUP_SINCE_USER_CONNECTION ]]; then
 		# force sync and backup
 	        echo "save-on" > $PIPE
 	        echo "save-all" > $PIPE
