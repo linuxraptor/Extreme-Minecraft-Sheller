@@ -36,20 +36,33 @@ MAX_BACKUP_PATH_SIZE_MB=100
 #                          TODO                              #
 ##############################################################
 
-# Maybe turn this into perl, it's getting nasty and desperately needs regex instead of awk.
-# ...Even if it isnt perl, it still needs regex instead of awk.
-# Clean up greps
-# Find more efficient PID tracking method that doesnt require pgrep | grep several times per second.
+# Add $pwd variable.
+# Bash trap "^C" to print "/stop" to minecraft for proper shutdown.
+# Remove connected.status file.  Same thing can be achieved by correct operation order.
+# Backups:
+	# Start with check for connected user.
+	# Begin sleep for however long is necessary.
+	# Run backup and start loop again.
+		# Largest potential issue is if java subshell is terminated.
+		# Perhaps run backup before closing if this is the case.
+# Sync:
+	# Not sure whether to have sync on java subshell close, or just have thread terminate
+	#   and have java subshell's final sync be good enough.
+# Use sed regex instead of awk.
+# Clean up greps, see if it is possible to avoid them.
+# Find more efficient PID tracking method that doesnt require pgrep | grep several times per second. - possibly finished
 # Consider real logging method where all output is passed upwards but filtered last minute by designation.
 # 	perhaps integrate real log levels like debug, notice, warning, and error.
-# Make an array of files necessary to access to check permissions quickly and with far less code.
-# Remove initial minecraft setup attempts, it is far too broken. Replace with quick java subshell that waits and closes.
-# 	Perhaps edit eula, but really, it should be removed maintaining it is a lot of work and minecraft server is constantly changing version names.
+# Make an array of files that this script needs to access and check permissions more effectively.
+# If server.properties does not exist but minecraft server jar does, try initial run procedures.
+	# Not sure what initial run procedures will be. Will need to know when first world generation is complete.
+	# Perhaps: if "world" name specified but folder is empty, make the volatile symlink but dont move anything.
+# IF recovering from poor shutdown, do not touch anything.  Instead look for most recently modified world files, alert user, and quit.
 
 ##############################################################
 ####        Don't Change Anything Below this point        ####
 ##############################################################
-
+SERVER_PROPERTIES_WORLD=$(sed -ne 's/level-name=//p' $(pwd)/server.properties)
 PIPE_SUFFIX=$SERVER_PROPERTIES_WORLD-$(date --rfc-3339=ns | awk -F. '{print $2}').pipe
 INPIPE=input-to-minecraft-$PIPE_SUFFIX
 OUTPIPE=output-from-minecraft-$PIPE_SUFFIX
@@ -169,7 +182,8 @@ if [ "$V" == yes ]; then
 fi
 
 # Temp disabling deletions
-#rm -rf $VOLATILE 2>&1 > /dev/null
+#################rm -rf $VOLATILE 2>&1 > /dev/null
+# This should use "unlink". I think.
 
 #Clean anything World that was left on the RAM
 if [ "$V" == yes ]; then
@@ -177,7 +191,7 @@ if [ "$V" == yes ]; then
 fi
 
 # Temp disabling deletions
-#rm -rf $WORLD_IN_RAM 2>&1 > /dev/null
+#################rm -rf $WORLD_IN_RAM 2>&1 > /dev/null
 
 #Setup folder in RAM for the world to be loaded
 if ! mkdir -p $WORLD_IN_RAM; then
@@ -256,7 +270,7 @@ if [ "$V" == yes ];
 		rsync -ravP --delete --force "$WORLD_IN_RAM/" "$WORLD"
 	else rsync -ravPq --delete --force "$WORLD_IN_RAM/" "$WORLD"
 fi
-rm -rf $VOLATILE
+#################rm -rf $VOLATILE
 if ! mkdir -p $VOLATILE; then
         echo "Couldn't move perminent world back to original location. Permissions maybe?"
         exit 1
@@ -269,7 +283,7 @@ if [ "$V" == yes ];
 fi
 
 # Temp disabling deletions
-#rm -rf $WORLD_IN_RAM
+#################rm -rf $WORLD_IN_RAM
 echo "Original state restored." > $OUTPIPE
 
 kill -15 $(pgrep -f $INPIPE)
@@ -368,7 +382,7 @@ while [ -d /proc/$JAVA_SUBSHELL_PID ];do
 	        done
 	        while [[ $POTENTIAL_SIZE -gt $MAX_BYTE_SIZE && -n ${existingbackups[0]} ]]
 		        do
-	                rm ${existingbackups[0]};
+#################	                rm ${existingbackups[0]};
 	                unset existingbackups[0];
 	                existingbackups=( "${existingbackups[@]}" );
 	                POTENTIAL_SIZE=$(($(du -s $BACKUP_PATH | awk '{ print $1 }') + $(du -s $WORLD_IN_RAM | awk '{ print $1 }')));
@@ -383,7 +397,7 @@ while [ -d /proc/$JAVA_SUBSHELL_PID ];do
 		DATE=$(date +%Y-%m-%d-%Hh%M)
 	        BACKUP_FILENAME=$SERVER_PROPERTIES_WORLD-$DATE-full.tgz
 	        tar -czhf $BACKUP_PATH/$BACKUP_FILENAME $WORLD >/dev/null 2>&1
-	        rm -f $BACKUP_FULL_LINK
+#################	        rm -f $BACKUP_FULL_LINK
 	        ln -s $BACKUP_FILENAME $BACKUP_FULL_LINK
 		echo "say -Backup synchronization complete.-" > $INPIPE
 		rm $BACKUP_SINCE_USER_CONNECTION
@@ -416,11 +430,13 @@ while [ $TRACK_JAVA_SUBSHELL_PID == 1 ]; do
                 sleep 1;
         else
                 kill -15 $CATPID >/dev/null 2>&1;
-                rm $OUTPIPE;
+		rm $OUTPIPE;
                 TRACK_JAVA_SUBSHELL_PID=0;
         fi
-done
+done &
 
+# This is clearly not working
 while read input; do
-	echo $input > $INPIPE
+#	echo $input > $INPIPE
+	print $input > $INPIPE
 done
