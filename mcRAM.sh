@@ -1,8 +1,7 @@
 #!/bin/bash
 ##############################################################
 # Title: MCRAM                                               #
-# Author: Linuxraptor                                        #
-# Contributors: Koodough, Crunchmuffin                       #
+# Author: Chris Kienstra                                     #
 # NO WARRANTIES YOU CREEPER                                  #
 # Place this file in the folder where minecraft server lies. #
 ##############################################################
@@ -37,7 +36,10 @@ MAX_BACKUP_PATH_SIZE_MB=100
 ##############################################################
 
 # Add $pwd variable.
+# Revise variable names, many of them are redundant or do not make any sense.
+# Add more comments.
 # Bash trap "^C" to print "/stop" to minecraft for proper shutdown.
+# Add "-A" to rsync options. This preserves ACLs.
 # Remove connected.status file.  Same thing can be achieved by correct operation order.
 # Backups:
 	# Start with check for connected user.
@@ -271,9 +273,10 @@ if [ "$V" == yes ];
 	else rsync -ravPq --delete --force "$WORLD_IN_RAM/" "$WORLD"
 fi
 #################rm -rf $VOLATILE
+unlink $VOLATILE
 if ! mkdir -p $VOLATILE; then
         echo "Couldn't move perminent world back to original location. Permissions maybe?"
-        exit 1
+        # exit 1; # Erroring out here is a BAD idea. This permission needs to be checked beforehand.
 fi
 if [ "$V" == yes ];
         then
@@ -438,5 +441,5 @@ done &
 # This is clearly not working
 while read input; do
 #	echo $input > $INPIPE
-	print $input > $INPIPE
+	printf $input >> $INPIPE;
 done
