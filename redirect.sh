@@ -4,15 +4,25 @@
 SERVER_JAR=minecraft_server.jar
 SERVER=$(pwd)/$SERVER_JAR
 
-MCPID=$(pgrep -lf $SERVER | awk -F' ' '{print $1}')
+MCPID=$(pgrep -f $SERVER)
 
 #ls -al /proc/$MCPID/fd | grep $(pwd) | grep .log | awk -F' ' '{print $9}'
 
+# here is something that works:
+# echo "/help" | tee -a world-764620586-05\:00.pipe 2>&1 > /proc/4487/fd/1
+# echo "/help" | tee -a [NAMED PIPE OF OPEN SESSION] 2>&1 > [FILE DESCRIPTOR OF PTY OR PTY ITSELF]
+
+# while read input; do echo $input | tee -a ../minecraft-07-11-2015/world-764620586-05\:00.pipe 2>&1 > /proc/4487/fd/1; done
+
 TAILPID=$(pwd)/tail-$(date --rfc-3339=ns | awk -F. '{print $2}').pid
 
-(tail -f -n 200 /proc/$MCPID/fd/10
-kill -15 $$
-) &
+MCPTY=$(readlink /proc/$MCPID/fd/* | grep -m 1 --color=never /dev/pts/)
+
+#(tail -f $MCPTY
+#kill -15 $$
+#) &
+
+
 
 # gotta look into possibility of this being 10 all the time
 # i wanna use the grep above but i get .log and .log.lck
@@ -20,7 +30,7 @@ kill -15 $$
 # or use grep to specifically exclude results.
 
 
-for f in $( ls -1 | grep .pipe )
+for f in $( ls -1 --color=never *.pipe )
 do
 	if [[ -n $(pgrep -f $f) ]]
 	then
@@ -29,7 +39,7 @@ do
 done
 
 while read input; do
-echo $input > $PIPE
+	echo $input > $PIPE
 done
 
 

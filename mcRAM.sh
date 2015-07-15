@@ -50,6 +50,18 @@ MAX_BACKUP_PATH_SIZE_MB=100
 ####        Don't Change Anything Below this point        ####
 ##############################################################
 
+PIPE_SUFFIX=$SERVER_PROPERTIES_WORLD-$(date --rfc-3339=ns | awk -F. '{print $2}').pipe
+INPIPE=input-to-minecraft-$PIPE_SUFFIX
+OUTPIPE=output-from-minecraft-$PIPE_SUFFIX
+
+mkfifo $OUTPIPE;
+
+exec 5<>$OUTPIPE;
+
+cat $OUTPIPE &
+# Must be cat. Tail will not work with named pipes.
+CATPID=$!;
+
 
 if [[ $# -gt 0 ]]
         then
@@ -74,12 +86,8 @@ fi
 SERVER=$(pwd)/$SERVER_JAR
 
 if [[ ! -f $SERVER ]]; then
-	echo "Server JAR file does not exist. Attempting to download." > $TTY
-	wget "https://s3.amazonaws.com/MinecraftDownload/launcher/minecraft_server.jar" $WORLD_DIRNAME/minecraft_server.jar
-	if [[ ! -f $SERVER ]]; then
-		echo "Fuck it. I cannot download this correctly." > $TTY
-		exit 1
-	fi
+	echo "Server JAR file does not exist." > $OUTPIPE
+	exit 1
 fi
 
 WORLD_DIRNAME=$(pwd)
@@ -87,24 +95,6 @@ WORLD_DIRNAME=$(pwd)
 WORLD=$WORLD_DIRNAME/world_storage
 
 SETTINGS=$(find $WORLD_DIRNAME -name server.properties)
-
-###############################################################################################################################3
-#if [[ ! -f $SETTINGS ]]; then
-	SERVER_PROPERTIES_WORLD=world
-	#PIPE=world-$(date --rfc-3339=ns | awk -F. '{print $2}').pipe
-	#mkfifo $PIPE
-	#tail -f $PIPE | $(java -server -Xms2048M -Xmx2048M -Djava.net.preferIPv4Stack=true -jar $SERVER nogui > /dev/null & )
-	#sleep 5
-	#echo "stop" > $PIPE
-        #kill -15 $(pgrep -f $PIPE)
-        #rm $PIPE
-	#while read input; do
-	#        echo $input > $PIPE
-	#done
-	##kill -15 $(pgrep -fl $SERVER | awk -F' ' '{print $1}')
-#else
-#	SERVER_PROPERTIES_WORLD=$(cat $SETTINGS | grep level-name= | awk -F= '{print $2}')
-#fi
 
 VOLATILE=$WORLD_DIRNAME/$SERVER_PROPERTIES_WORLD
 
@@ -115,43 +105,43 @@ TTY=$(tty)
 BACKUP_FULL_LINK=${BACKUP_PATH}/${SERVER_PROPERTIES_WORLD}_full.tgz
 
 if [ "$V" == yes ]; then
-	echo "Creating directory structure." > $TTY
+	echo "Creating directory structure." > $OUTPIPE
 fi
 
 if [[ ! -d $WORLD  ]]; then
         if ! mkdir -p $WORLD; then
-               echo "$WORLD does not exist and I could not create the directory! Permissions maybe?" > $TTY
+               echo "$WORLD does not exist and I could not create the directory! Permissions maybe?" > $OUTPIPE
                exit 1 #FAIL :(
         fi
 fi
 
 if [[ ! -d $VOLATILE  ]]; then
         if ! mkdir -p $VOLATILE; then
-                echo "$VOLATILE does not exist and I could not create the directory! Permissions maybe?"  > $TTY
+                echo "$VOLATILE does not exist and I could not create the directory! Permissions maybe?"  > $OUTPIPE
                 exit 1 #FAIL :(
         fi
 fi
 
 if [[ ! -d $WORLD_IN_RAM  ]]; then
         if ! mkdir -p $WORLD_IN_RAM; then
-                echo "$WORLD_IN_RAM does not exist and I could not create the directory! Permissions maybe?" > $TTY
+                echo "$WORLD_IN_RAM does not exist and I could not create the directory! Permissions maybe?" > $OUTPIPE
                 exit 1 #FAIL :(
         fi
 fi
 
 if [[ ! -d $BACKUP_PATH  ]]; then
         if ! mkdir -p $BACKUP_PATH; then
-                echo "Backup path $BACKUP_PATH does not exist and I could not create the directory! Permissions maybe?" > $TTY
+                echo "Backup path $BACKUP_PATH does not exist and I could not create the directory! Permissions maybe?" > $OUTPIPE
                 exit 1 #FAIL :(
         fi
 fi
 
  if [ "$V" == yes ]; then
-	echo "Copying original world to perminent world storage." > $TTY
+	echo "Copying original world to perminent world storage." > $OUTPIPE
 fi
 
 if [ "$V" == yes ];
-	then rsync -rav $VOLATILE/ $WORLD  > $TTY
+	then rsync -rav $VOLATILE/ $WORLD  > $OUTPIPE
 	else rsync -ravq $VOLATILE/ $WORLD
 fi
 
@@ -166,55 +156,57 @@ if [ $(file $VOLATILE | awk -F' ' {'print $2'}) == directory ];
 		screen -wipe
 fi
 if [ "$V" == yes ]; then
-	echo 'Removing any leftover lockfiles. (In case of destroyed process)' > $TTY
+	echo 'Removing any leftover lockfiles. (In case of destroyed process)' > $OUTPIPE
 fi
 
 if [ "$V" == yes ];
-	then rm $WORLD/session.lock $WORLD_DIRNAME/server.log.lck $VOLATILE/session.lock  > $TTY
+	then rm $WORLD/session.lock $WORLD_DIRNAME/server.log.lck $VOLATILE/session.lock  > $OUTPIPE
 	else rm -f $WORLD/session.lock $WORLD_DIRNAME/server.log.lck $VOLATILE/session.lock
 fi
 
 if [ "$V" == yes ]; then
-	echo 'Removing old symlinks. (In case of destroyed process)' > $TTY
+	echo 'Removing old symlinks. (In case of destroyed process)' > $OUTPIPE
 fi
-rm -rf $VOLATILE 2>&1 > /dev/null
+
+# Temp disabling deletions
+#rm -rf $VOLATILE 2>&1 > /dev/null
 
 #Clean anything World that was left on the RAM
 if [ "$V" == yes ]; then
-	echo 'Clearing any leftover RAM junk. (In case of destroyed process)' > $TTY
+	echo 'Clearing any leftover RAM junk. (In case of destroyed process)' > $OUTPIPE
 fi
-rm -rf $WORLD_IN_RAM 2>&1 > /dev/null
+
+# Temp disabling deletions
+#rm -rf $WORLD_IN_RAM 2>&1 > /dev/null
 
 #Setup folder in RAM for the world to be loaded
 if ! mkdir -p $WORLD_IN_RAM; then
-        echo "$WORLD_IN_RAM does not exist and I could not create the directory! Permissions maybe?" > $TTY
+        echo "$WORLD_IN_RAM does not exist and I could not create the directory! Permissions maybe?" > $OUTPIPE
         exit 1 #FAIL :(
 fi
 
 if [ "$V" == yes ]; then
-	echo "Copying $WORLD backup to $WORLD_IN_RAM." > $TTY
+	echo "Copying $WORLD backup to $WORLD_IN_RAM." > $OUTPIPE
 fi
 cp -aR $WORLD/* $WORLD_IN_RAM/
 
 if [ "$V" == yes ]; then
-	echo "Entering directory $WORLD_DIRNAME."  > $TTY
+	echo "Entering directory $WORLD_DIRNAME."  > $OUTPIPE
 fi
 cd $WORLD_DIRNAME
 
-echo "Linking $VOLATILE to $WORLD_IN_RAM" > $TTY
+echo "Linking $VOLATILE to $WORLD_IN_RAM" > $OUTPIPE
 ln -s $WORLD_IN_RAM $VOLATILE
 
 if [ "$V" == yes ]; then
-	echo "Starting perminent minecraft world $WORLD with RAM link to $VOLATILE." > $TTY
+	echo "Starting perminent minecraft world $WORLD with RAM link to $VOLATILE." > $OUTPIPE
 fi
 
-rm -f $WORLD_DIRNAME/*.pipe
-PIPE=$SERVER_PROPERTIES_WORLD-$(date --rfc-3339=ns | awk -F. '{print $2}').pipe
-mkfifo $PIPE
+mkfifo $INPIPE
 ############################
 # BENNING of java subshell #
 ############################
-# tail -f $PIPE | $(java -server -Xms2048M -Xmx2048M -Djava.net.preferIPv4Stack=true -jar $SERVER nogui > $TTY
+# tail -f $INPIPE | $(java -server -Xms2048M -Xmx2048M -Djava.net.preferIPv4Stack=true -jar $SERVER nogui > $OUTPIPE
 
 # rem IntelliJ's suggested options for 64-bit java.exe
 # set /E /S JAVA_OPTIONS=-Xms128m -Xmx750m -XX:MaxPermSize=350m -XX:ReservedCodeCacheSize=96m -ea -Dsun.io.useCanonCaches=false -Djava.net.preferIPv4Stack=true -Djsse.enableSNIExtension=false -$
@@ -239,7 +231,7 @@ mkfifo $PIPE
 # more info here:
 # https://jazz.net/help-dev/clm/index.jsp?re=1&topic=/com.ibm.jazz.repository.web.admin.doc/topics/t_server_mon_tomcat_option2.html&scope=null
 
-tail -f $PIPE | $(
+tail -f $INPIPE | $(
 	java \
 	-server \
 	-Xms2048M \
@@ -253,10 +245,10 @@ tail -f $PIPE | $(
 	-Djava.net.preferIPv4Addresses \
 	-Dsun.io.useCanonCaches=false \
 	-Djsse.enableSNIExtension=false \
-	-jar $SERVER nogui > $TTY
+	-jar $SERVER nogui >&5 2>&1;
 
 sleep 3
-# I HATE sleep statements but it's needed to prevent file collisions. Minecraft or java will claim to be terminated when files are still being modified.
+# I HATE sleep statements but its needed to prevent file collisions. Minecraft or java will claim to be terminated when files are still being modified.
 # I spent a while lowering this as much as possible while retaining its dependability.
 if [ "$V" == yes ];
 	then
@@ -276,12 +268,15 @@ if [ "$V" == yes ];
         else rsync -ravq --delete --force $WORLD_IN_RAM/ $VOLATILE
 fi
 
-rm -rf $WORLD_IN_RAM
-echo "Original state restored." > $TTY
+# Temp disabling deletions
+#rm -rf $WORLD_IN_RAM
+echo "Original state restored." > $OUTPIPE
 
-kill -15 $(pgrep -f $PIPE)
-rm $PIPE
-kill -15 $$) &
+kill -15 $(pgrep -f $INPIPE)
+rm $INPIPE
+kill -15 $$
+) &
+JAVA_SUBSHELL_PID=$!;
 ########################
 # END of java subshell #
 ########################
@@ -296,7 +291,7 @@ DATE=$(date +'%Y-%m-%d %X')
 CONNECTIONFILE=/tmp/$MCPID.status
 BACKUP_SINCE_USER_CONNECTION=/tmp/$MCPID.recentbackup
 
-while [[ -n $(pgrep -f $0 | grep $LEAD_PID) ]];do
+while [ -d /proc/$JAVA_SUBSHELL_PID ];do
    # connection check
 	PLAYERS=$( netstat -an  inet | grep $MCPORT | grep ESTABLISHED |  awk '{print $5}' |  awk -F: '{print $1}' );
 	if [[ -n $PLAYERS ]]
@@ -308,7 +303,7 @@ while [[ -n $(pgrep -f $0 | grep $LEAD_PID) ]];do
 	                touch $CONNECTIONFILE
 			touch $BACKUP_SINCE_USER_CONNECTION
 	                CONNECTION==1
-			echo "say User presence logged" > $PIPE
+			echo "say User presence logged" > $INPIPE
 		fi
 	else
 	        CONNECTION==0
@@ -318,22 +313,22 @@ while [[ -n $(pgrep -f $0 | grep $LEAD_PID) ]];do
         SECONDS_TO_SLEEP=60;
         for (( i=0; i<$SECONDS_TO_SLEEP; i++ )); do
                 sleep 1;
-                if [[ ! -n $(pgrep -f $0 | grep $LEAD_PID) ]]; then
+                if [ -d /proc/$JAVA_SUBSHELL_PID ]; then
                         exit 0;
                 fi
         done
 done &
 
-while [[ -n $(pgrep -f $0 | grep $LEAD_PID) ]];do
+while [ -d /proc/$JAVA_SUBSHELL_PID ];do
    # smart sync
 	if [[ -a $CONNECTIONFILE ]]
 	then
-		echo "save-on" > $PIPE
-		echo "save-all" > $PIPE
-		echo "save-off" > $PIPE
+		echo "save-on" > $INPIPE
+		echo "save-all" > $INPIPE
+		echo "save-off" > $INPIPE
 		# Think about keeping saving on all the time and only disabling it immediately before a sync.
 		rsync -ravq --delete --force "$WORLD_IN_RAM/" "$WORLD"
-		echo "say RAM Sync complete." > $PIPE
+		echo "say RAM Sync complete." > $INPIPE
 	        PLAYERS=$( netstat -an  inet | grep $MCPORT | grep ESTABLISHED |  awk '{print $5}' |  awk -F: '{print $1}' );
 	        if [[ -n $PLAYERS ]]
 	                then
@@ -348,21 +343,21 @@ while [[ -n $(pgrep -f $0 | grep $LEAD_PID) ]];do
         SECONDS_TO_SLEEP=300;
         for (( i=0; i<$SECONDS_TO_SLEEP; i++ )); do
                 sleep 1;
-                if [[ ! -n $(pgrep -f $0 | grep $LEAD_PID) ]]; then
+                if [ -d /proc/$JAVA_SUBSHELL_PID ]; then
                         exit 0;
                 fi
         done
 done &
 
-while [[ -n $(pgrep -f $0 | grep $LEAD_PID) ]];do
+while [ -d /proc/$JAVA_SUBSHELL_PID ];do
 
 	if [[ -a $BACKUP_SINCE_USER_CONNECTION ]]; then
 		# force sync and backup
-	        echo "save-on" > $PIPE
-	        echo "save-all" > $PIPE
-	        echo "save-off" > $PIPE
+	        echo "save-on" > $INPIPE
+	        echo "save-all" > $INPIPE
+	        echo "save-off" > $INPIPE
 	        rsync -ravq --delete --force "$WORLD_IN_RAM/" "$WORLD"
-	        echo "say RAM Sync complete." > $PIPE
+	        echo "say RAM Sync complete." > $INPIPE
 	        SIZE_IN_BYTES=$(du -s $BACKUP_PATH | awk '{ print $1 }');
 	        MAX_BYTE_SIZE=$((1000 * $MAX_BACKUP_PATH_SIZE_MB));
 	        POTENTIAL_SIZE=$(($(du -s $BACKUP_PATH | awk '{ print $1 }') + $(du -s $VOLATILE | awk '{ print $1 }')));
@@ -380,7 +375,7 @@ while [[ -n $(pgrep -f $0 | grep $LEAD_PID) ]];do
 	        done
 	        if [[ ! -d $BACKUP_PATH  ]]; then
 	                if ! mkdir -p $BACKUP_PATH; then
-	                        echo "Backup path $BACKUP_PATH does not exist and I could not create the directory! Permissions maybe?" > $TTY
+	                        echo "Backup path $BACKUP_PATH does not exist and I could not create the directory! Permissions maybe?" > $OUTPIPE
 	                        exit 1 #FAIL :(
 	                fi
 	        fi
@@ -390,7 +385,7 @@ while [[ -n $(pgrep -f $0 | grep $LEAD_PID) ]];do
 	        tar -czhf $BACKUP_PATH/$BACKUP_FILENAME $WORLD >/dev/null 2>&1
 	        rm -f $BACKUP_FULL_LINK
 	        ln -s $BACKUP_FILENAME $BACKUP_FULL_LINK
-		echo "say -Backup synchronization complete.-" > $PIPE
+		echo "say -Backup synchronization complete.-" > $INPIPE
 		rm $BACKUP_SINCE_USER_CONNECTION
 		renice -n -10 -p $MCPID >/dev/null 2>&1
 
@@ -398,7 +393,7 @@ while [[ -n $(pgrep -f $0 | grep $LEAD_PID) ]];do
 	        SECONDS_TO_SLEEP=10800;
 	        for (( i=0; i<$SECONDS_TO_SLEEP; i++ )); do
 	                sleep 1;
-	                if [[ ! -n $(pgrep -f $0 | grep $LEAD_PID) ]]; then
+	                if [ -d /proc/$JAVA_SUBSHELL_PID ]; then
 	                        exit 0;
 	                fi
 	        done
@@ -408,13 +403,24 @@ while [[ -n $(pgrep -f $0 | grep $LEAD_PID) ]];do
 	        SECONDS_TO_SLEEP=10800;
 	        for (( i=0; i<$SECONDS_TO_SLEEP; i++ )); do
 	                sleep 1;
-	                if [[ ! -n $(pgrep -f $0 | grep $LEAD_PID) ]]; then
+	                if [ -d /proc/$JAVA_SUBSHELL_PID ]; then
 	                        exit 0;
 	                fi
 	        done
 	fi
 done &
 
+TRACK_JAVA_SUBSHELL_PID=1;
+while [ $TRACK_JAVA_SUBSHELL_PID == 1 ]; do
+        if [ -d /proc/$JAVA_SUBSHELL_PID ]; then
+                sleep 1;
+        else
+                kill -15 $CATPID >/dev/null 2>&1;
+                rm $OUTPIPE;
+                TRACK_JAVA_SUBSHELL_PID=0;
+        fi
+done
+
 while read input; do
-	echo $input > $PIPE
+	echo $input > $INPIPE
 done
