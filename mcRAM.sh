@@ -130,8 +130,9 @@ fi
 COPY_OF_WORLD=$DIRNAME/world_storage
 
 SETTINGS=$(find $DIRNAME -name server.properties)
+# is find command necessary here? perhaps replace with $DIRNAME/server.properties and be done with it
 
-MINECRAFT_WORLD_SYMLINK=$DIRNAME/$SERVER_PROPERTIES_WORLD
+MINECRAFT_WORLD=$DIRNAME/$SERVER_PROPERTIES_WORLD
 
 WORLD_IN_RAM=/dev/shm/$SERVER_PROPERTIES_WORLD
 
@@ -150,9 +151,9 @@ if [[ ! -d $COPY_OF_WORLD  ]]; then
         fi
 fi
 
-if [[ ! -d $VOLATILE  ]]; then
-        if ! mkdir -p $VOLATILE; then
-                echo "$VOLATILE does not exist and I could not create the directory! Permissions maybe?"  > $OUTPIPE
+if [[ ! -d $MINECRAFT_WORLD  ]]; then
+        if ! mkdir -p $MINECRAFT_WORLD; then
+                echo "$MINECRAFT_WORLD does not exist and I could not create the directory! Permissions maybe?"  > $OUTPIPE
                 exit 1 #FAIL :(
         fi
 fi
@@ -176,18 +177,18 @@ fi
 fi
 
 if [ "$V" == yes ];
-	then rsync -rav $VOLATILE/ $COPY_OF_WORLD  > $OUTPIPE
-	else rsync -ravq $VOLATILE/ $COPY_OF_WORLD
+	then rsync -rav $MINECRAFT_WORLD/ $COPY_OF_WORLD  > $OUTPIPE
+	else rsync -ravq $MINECRAFT_WORLD/ $COPY_OF_WORLD
 fi
 
-if [ $(file $VOLATILE | awk -F' ' {'print $2'}) == directory ];
+if [ $(file $MINECRAFT_WORLD | awk -F' ' {'print $2'}) == directory ];
 	# If minecraft is stopped correctly, "world" will be a directory. If not, it will still be a symlink.
 	# This looks at the filetype and determines if the old backups need to remain due to an incorrect termination.
 	then
-		OLD_BACKUPS=$VOLATILE"-backup-*" # I have to do this stupid shit because using the expression directly
+		OLD_BACKUPS=$MINECRAFT_WORLD"-backup-*" # I have to do this stupid shit because using the expression directly
 		rm -rf $OLD_BACKUPS              # in rm causes the wildcard to be ignored.
-#		mv $VOLATILE $VOLATILE"-backup-"$(date +%Y-%m-%d-%Hh%M)
-		 rsync -ravmP --delete --remove-source-files $VOLATILE $VOLATILE"-backup-"$(date +%Y-%m-%d-%Hh%M)
+#		mv $MINECRAFT_WORLD $MINECRAFT_WORLD"-backup-"$(date +%Y-%m-%d-%Hh%M)
+		 rsync -ravmP --delete --remove-source-files $MINECRAFT_WORLD $MINECRAFT_WORLD"-backup-"$(date +%Y-%m-%d-%Hh%M)
 	else
 		screen -wipe
 fi
@@ -196,25 +197,13 @@ if [ "$V" == yes ]; then
 fi
 
 if [ "$V" == yes ];
-	then rm $COPY_OF_WORLD/session.lock $DIRNAME/server.log.lck $VOLATILE/session.lock  > $OUTPIPE
-	else rm -f $COPY_OF_WORLD/session.lock $DIRNAME/server.log.lck $VOLATILE/session.lock
+	then rm $COPY_OF_WORLD/session.lock $DIRNAME/server.log.lck $MINECRAFT_WORLD/session.lock  > $OUTPIPE
+	else rm -f $COPY_OF_WORLD/session.lock $DIRNAME/server.log.lck $MINECRAFT_WORLD/session.lock
 fi
 
 if [ "$V" == yes ]; then
 	echo 'Removing old symlinks. (In case of destroyed process)' > $OUTPIPE
 fi
-
-# Temp disabling deletions
-#################rm -rf $VOLATILE 2>&1 > /dev/null
-# This should use "unlink". I think.
-
-#Clean anything World that was left on the RAM
-if [ "$V" == yes ]; then
-	echo 'Clearing any leftover RAM junk. (In case of destroyed process)' > $OUTPIPE
-fi
-
-# Temp disabling deletions
-#################rm -rf $WORLD_IN_RAM 2>&1 > /dev/null
 
 #Setup folder in RAM for the world to be loaded
 if ! mkdir -p $WORLD_IN_RAM; then
@@ -222,9 +211,12 @@ if ! mkdir -p $WORLD_IN_RAM; then
         exit 1 #FAIL :(
 fi
 
+#############################################################################
+# Copy directly from "$WORLD" instead of "$COPY_OF_WORLD".
 if [ "$V" == yes ]; then
 	echo "Copying $COPY_OF_WORLD backup to $WORLD_IN_RAM." > $OUTPIPE
 fi
+# Replace this with rsync.
 cp -aR $COPY_OF_WORLD/* $WORLD_IN_RAM/
 
 if [ "$V" == yes ]; then
@@ -232,18 +224,23 @@ if [ "$V" == yes ]; then
 fi
 cd $DIRNAME
 
-echo "Linking $VOLATILE to $WORLD_IN_RAM" > $OUTPIPE
-ln -s $WORLD_IN_RAM $VOLATILE
+# THIS is where we first use our minecraft world's symlink!
+# Symlinks can sit "on top" of directories, meaning: after this command,
+# the minecraft world will be a symlink, but the orignal minecraft world directory still exists.
+# The directory is simply hidden.
+# We can unlink without consequence and the directory will appear once again.
+
+echo "Linking $MINECRAFT_WORLD to $WORLD_IN_RAM" > $OUTPIPE
+ln -s $WORLD_IN_RAM $MINECRAFT_WORLD
 
 if [ "$V" == yes ]; then
-	echo "Starting perminent minecraft world $COPY_OF_WORLD with RAM link to $VOLATILE." > $OUTPIPE
+	echo "Starting minecraft world $COPY_OF_WORLD with RAM link to $MINECRAFT_WORLD." > $OUTPIPE
 fi
 
 mkfifo $INPIPE
 ############################
 # BENNING of java subshell #
 ############################
-# tail -f $INPIPE | $(java -server -Xms2048M -Xmx2048M -Djava.net.preferIPv4Stack=true -jar $SERVER nogui > $OUTPIPE
 
 # rem IntelliJ's suggested options for 64-bit java.exe
 # set /E /S JAVA_OPTIONS=-Xms128m -Xmx750m -XX:MaxPermSize=350m -XX:ReservedCodeCacheSize=96m -ea -Dsun.io.useCanonCaches=false -Djava.net.preferIPv4Stack=true -Djsse.enableSNIExtension=false -$
@@ -293,20 +290,21 @@ if [ "$V" == yes ];
 		rsync -ravmP --delete "$WORLD_IN_RAM/" "$COPY_OF_WORLD"
 	else rsync -ravPmq --delete "$WORLD_IN_RAM/" "$COPY_OF_WORLD"
 fi
-#################rm -rf $VOLATILE # replaced by unlink command below.
-unlink $VOLATILE
-if ! mkdir -p $VOLATILE; then
+unlink $MINECRAFT_WORLD
+if ! mkdir -p $MINECRAFT_WORLD; then
         echo "Couldn't move perminent world back to original location. Permissions maybe?"
         # exit 1; # Erroring out here is a BAD idea. This permission needs to be checked beforehand.
 fi
 if [ "$V" == yes ];
         then
 		echo "Restoring original world location"
-		rsync -ravm --delete $WORLD_IN_RAM/ $VOLATILE
-        else rsync -ravmq --delete $WORLD_IN_RAM/ $VOLATILE
+		rsync -ravm --delete $WORLD_IN_RAM/ $MINECRAFT_WORLD
+        else rsync -ravmq --delete $WORLD_IN_RAM/ $MINECRAFT_WORLD
 fi
 
 # Temp disabling deletions
+# I mean, is this really necessary? What if a ram sync failed?
+# We would be deleting the last remaining copy of the world.
 #################rm -rf $WORLD_IN_RAM
 echo "Original state restored." > $OUTPIPE
 
@@ -398,7 +396,7 @@ while [ -d /proc/$JAVA_SUBSHELL_PID ];do
 	        echo "say RAM Sync complete." > $INPIPE
 	        SIZE_IN_BYTES=$(du -s $BACKUP_PATH | awk '{ print $1 }');
 	        MAX_BYTE_SIZE=$((1000 * $MAX_BACKUP_PATH_SIZE_MB));
-	        POTENTIAL_SIZE=$(($(du -s $BACKUP_PATH | awk '{ print $1 }') + $(du -s $VOLATILE | awk '{ print $1 }')));
+	        POTENTIAL_SIZE=$(($(du -s $BACKUP_PATH | awk '{ print $1 }') + $(du -s $MINECRAFT_WORLD | awk '{ print $1 }')));
 	        declare -a existingbackups
 	        for f in $(echo $(find $BACKUP_PATH -size +1M | sort -g))
 		        do
