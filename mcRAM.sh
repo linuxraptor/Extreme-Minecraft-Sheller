@@ -25,7 +25,8 @@ SERVER_JAR=minecraft_server.jar
 #  You can optionally change these, but it isnt necessary.   #
 ##############################################################
 
-BACKUP_PATH=$(pwd)/automatic_backups
+WORLD_DIRNAME=$(pwd)
+BACKUP_PATH=$WORLD_DIRNAME/automatic_backups
 MAX_BACKUP_FILES=6
 MAX_BACKUP_PATH_SIZE_MB=100
 
@@ -35,7 +36,6 @@ MAX_BACKUP_PATH_SIZE_MB=100
 #                          TODO                              #
 ##############################################################
 
-# Add $pwd variable.
 # Revise variable names, many of them are redundant or do not make any sense.
 # Add more comments.
 # Bash trap "^C" to print "/stop" to minecraft for proper shutdown.
@@ -60,21 +60,40 @@ MAX_BACKUP_PATH_SIZE_MB=100
 	# Not sure what initial run procedures will be. Will need to know when first world generation is complete.
 	# Perhaps: if "world" name specified but folder is empty, make the volatile symlink but dont move anything.
 # IF recovering from poor shutdown, do not touch anything.  Instead look for most recently modified world files, alert user, and quit.
+# Functions. And classes. And objects. And things that resemble a real program, not just a one-shot script.
+
+
 
 ##############################################################
 ####        Don't Change Anything Below this point        ####
 ##############################################################
-SERVER_PROPERTIES_WORLD=$(sed -ne 's/level-name=//p' $(pwd)/server.properties)
-PIPE_SUFFIX=$SERVER_PROPERTIES_WORLD-$(date --rfc-3339=ns | awk -F. '{print $2}').pipe
+SERVER_PROPERTIES_WORLD=$(sed -ne 's/level-name=//p' $WORLD_DIRNAME/server.properties)
+PIPE_SUFFIX=$(date --rfc-3339=ns | awk -F. '{print $2}').pipe
 INPIPE=input-to-minecraft-$PIPE_SUFFIX
 OUTPIPE=output-from-minecraft-$PIPE_SUFFIX
 
 mkfifo $OUTPIPE;
 
+# This is where the output pipe magic happens.
+# We are opening a reading and writing file descriptor named "5".
+# (<) Reading so minecraft can print output to it.
+# (>) Writing so it can pass those commands to our STDOUT.
+# This matters because we want the ability to modify the file descriptor later to
+# Write to a new TTY STDOUT in case we lose our console connection to minecraft.
+# The normal read and write file descriptors (0 and 1) typically cannot be connected to new
+# inputs and outputs once they are bound to a certain STDIN and STDOUT
+# without a call made by a lower level language. It might be more possible
+# if I experimented with exec further.
+# More info here:
+# https://github.com/jerome-pouiller/reredirect
 exec 5<>$OUTPIPE;
 
+# Must be cat. While "tail" works printing information to named pipes,
+# it does not work printing output from named pipes.
+# This command connects our minecraft output pipe to our TTY STDOUT.
 cat $OUTPIPE &
-# Must be cat. Tail will not work with named pipes.
+
+# Now we know what PID to kill when the script is ending.
 CATPID=$!;
 
 
@@ -98,14 +117,13 @@ if [ "$V" == yes ]; then
 	echo "Setting variables."
 fi
 
-SERVER=$(pwd)/$SERVER_JAR
+
+SERVER=$WORLD_DIRNAME/$SERVER_JAR
 
 if [[ ! -f $SERVER ]]; then
 	echo "Server JAR file does not exist." > $OUTPIPE
 	exit 1
 fi
-
-WORLD_DIRNAME=$(pwd)
 
 WORLD=$WORLD_DIRNAME/world_storage
 
@@ -166,7 +184,8 @@ if [ $(file $VOLATILE | awk -F' ' {'print $2'}) == directory ];
 	then
 		OLD_BACKUPS=$VOLATILE"-backup-*" # I have to do this stupid shit because using the expression directly
 		rm -rf $OLD_BACKUPS              # in rm causes the wildcard to be ignored.
-		mv $VOLATILE $VOLATILE"-backup-"$(date +%Y-%m-%d-%Hh%M)
+#		mv $VOLATILE $VOLATILE"-backup-"$(date +%Y-%m-%d-%Hh%M)
+		 rsync -ravmP --delete --remove-source-files $VOLATILE $VOLATILE"-backup-"$(date +%Y-%m-%d-%Hh%M)
 	else
 		screen -wipe
 fi
@@ -269,10 +288,10 @@ sleep 3
 if [ "$V" == yes ];
 	then
 		echo "Syncing RAM and permanent storage."
-		rsync -ravP --delete --force "$WORLD_IN_RAM/" "$WORLD"
-	else rsync -ravPq --delete --force "$WORLD_IN_RAM/" "$WORLD"
+		rsync -ravmP --delete "$WORLD_IN_RAM/" "$WORLD"
+	else rsync -ravPmq --delete "$WORLD_IN_RAM/" "$WORLD"
 fi
-#################rm -rf $VOLATILE
+#################rm -rf $VOLATILE # replaced by unlink command below.
 unlink $VOLATILE
 if ! mkdir -p $VOLATILE; then
         echo "Couldn't move perminent world back to original location. Permissions maybe?"
@@ -281,8 +300,8 @@ fi
 if [ "$V" == yes ];
         then
 		echo "Restoring original world location"
-		rsync -rav --delete --force $WORLD_IN_RAM/ $VOLATILE
-        else rsync -ravq --delete --force $WORLD_IN_RAM/ $VOLATILE
+		rsync -ravm --delete $WORLD_IN_RAM/ $VOLATILE
+        else rsync -ravmq --delete $WORLD_IN_RAM/ $VOLATILE
 fi
 
 # Temp disabling deletions
@@ -344,7 +363,7 @@ while [ -d /proc/$JAVA_SUBSHELL_PID ];do
 		echo "save-all" > $INPIPE
 		echo "save-off" > $INPIPE
 		# Think about keeping saving on all the time and only disabling it immediately before a sync.
-		rsync -ravq --delete --force "$WORLD_IN_RAM/" "$WORLD"
+		rsync -ravmq --delete "$WORLD_IN_RAM/" "$WORLD"
 		echo "say RAM Sync complete." > $INPIPE
 	        PLAYERS=$( netstat -an  inet | grep $MCPORT | grep ESTABLISHED |  awk '{print $5}' |  awk -F: '{print $1}' );
 	        if [[ -n $PLAYERS ]]
@@ -373,7 +392,7 @@ while [ -d /proc/$JAVA_SUBSHELL_PID ];do
 	        echo "save-on" > $INPIPE
 	        echo "save-all" > $INPIPE
 	        echo "save-off" > $INPIPE
-	        rsync -ravq --delete --force "$WORLD_IN_RAM/" "$WORLD"
+	        rsync -ravmq --delete "$WORLD_IN_RAM/" "$WORLD"
 	        echo "say RAM Sync complete." > $INPIPE
 	        SIZE_IN_BYTES=$(du -s $BACKUP_PATH | awk '{ print $1 }');
 	        MAX_BYTE_SIZE=$((1000 * $MAX_BACKUP_PATH_SIZE_MB));
