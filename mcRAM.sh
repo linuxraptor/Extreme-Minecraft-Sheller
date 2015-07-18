@@ -25,8 +25,8 @@ SERVER_JAR=minecraft_server.jar
 #  You can optionally change these, but it isnt necessary.   #
 ##############################################################
 
-WORLD_DIRNAME=$(pwd)
-BACKUP_PATH=$WORLD_DIRNAME/automatic_backups
+DIRNAME=$(pwd)
+BACKUP_PATH=$DIRNAME/automatic_backups
 MAX_BACKUP_FILES=6
 MAX_BACKUP_PATH_SIZE_MB=100
 
@@ -53,7 +53,6 @@ MAX_BACKUP_PATH_SIZE_MB=100
 # Use sed regex instead of awk.
 # Clean up greps, see if it is possible to avoid them.
 # Find more efficient PID tracking method that doesnt require pgrep | grep several times per second. - possibly finished
-# Consider real logging method where all output is passed upwards but filtered last minute by designation.
 # 	perhaps integrate real log levels like debug, notice, warning, and error.
 # Make an array of files that this script needs to access and check permissions more effectively.
 # If server.properties does not exist but minecraft server jar does, try initial run procedures.
@@ -61,13 +60,14 @@ MAX_BACKUP_PATH_SIZE_MB=100
 	# Perhaps: if "world" name specified but folder is empty, make the volatile symlink but dont move anything.
 # IF recovering from poor shutdown, do not touch anything.  Instead look for most recently modified world files, alert user, and quit.
 # Functions. And classes. And objects. And things that resemble a real program, not just a one-shot script.
+# Consider real logging method where all output is passed upwards but filtered last minute by designation.
 
 
 
 ##############################################################
 ####        Don't Change Anything Below this point        ####
 ##############################################################
-SERVER_PROPERTIES_WORLD=$(sed -ne 's/level-name=//p' $WORLD_DIRNAME/server.properties)
+SERVER_PROPERTIES_WORLD=$(sed -ne 's/level-name=//p' $DIRNAME/server.properties)
 PIPE_SUFFIX=$(date --rfc-3339=ns | awk -F. '{print $2}').pipe
 INPIPE=input-to-minecraft-$PIPE_SUFFIX
 OUTPIPE=output-from-minecraft-$PIPE_SUFFIX
@@ -84,16 +84,18 @@ mkfifo $OUTPIPE;
 # inputs and outputs once they are bound to a certain STDIN and STDOUT
 # without a call made by a lower level language. It might be more possible
 # if I experimented with exec further.
-# More info here:
+# More info about exec here:
+# http://pubs.opengroup.org/onlinepubs/009604599/utilities/exec.html#tag_04_46_17
+# More info about C-level proc calls here:
 # https://github.com/jerome-pouiller/reredirect
 exec 5<>$OUTPIPE;
 
-# Must be cat. While "tail" works printing information to named pipes,
-# it does not work printing output from named pipes.
+# Must be cat. While "tail" works printing information TO named pipes,
+# it does not work printing output FROM named pipes.
 # This command connects our minecraft output pipe to our TTY STDOUT.
 cat $OUTPIPE &
 
-# Now we know what PID to kill when the script is ending.
+# Now we record what PID to kill when the script is ending.
 CATPID=$!;
 
 
@@ -118,20 +120,20 @@ if [ "$V" == yes ]; then
 fi
 
 
-SERVER=$WORLD_DIRNAME/$SERVER_JAR
+SERVER_EXECUTABLE=$DIRNAME/$SERVER_JAR
 
-if [[ ! -f $SERVER ]]; then
+if [[ ! -f $SERVER_EXECUTABLE ]]; then
 	echo "Server JAR file does not exist." > $OUTPIPE
 	exit 1
 fi
 
-WORLD=$WORLD_DIRNAME/world_storage
+COPY_OF_WORLD=$DIRNAME/world_storage
 
-SETTINGS=$(find $WORLD_DIRNAME -name server.properties)
+SETTINGS=$(find $DIRNAME -name server.properties)
 
-VOLATILE=$WORLD_DIRNAME/$SERVER_PROPERTIES_WORLD
+MINECRAFT_WORLD_SYMLINK=$DIRNAME/$SERVER_PROPERTIES_WORLD
 
-WORLD_IN_RAM=/dev/shm/$VOLATILE
+WORLD_IN_RAM=/dev/shm/$SERVER_PROPERTIES_WORLD
 
 TTY=$(tty)
 
@@ -141,9 +143,9 @@ if [ "$V" == yes ]; then
 	echo "Creating directory structure." > $OUTPIPE
 fi
 
-if [[ ! -d $WORLD  ]]; then
-        if ! mkdir -p $WORLD; then
-               echo "$WORLD does not exist and I could not create the directory! Permissions maybe?" > $OUTPIPE
+if [[ ! -d $COPY_OF_WORLD  ]]; then
+        if ! mkdir -p $COPY_OF_WORLD; then
+               echo "Could not create directory: $COPY_OF_WORLD. Permissions maybe?" > $OUTPIPE
                exit 1 #FAIL :(
         fi
 fi
@@ -174,8 +176,8 @@ fi
 fi
 
 if [ "$V" == yes ];
-	then rsync -rav $VOLATILE/ $WORLD  > $OUTPIPE
-	else rsync -ravq $VOLATILE/ $WORLD
+	then rsync -rav $VOLATILE/ $COPY_OF_WORLD  > $OUTPIPE
+	else rsync -ravq $VOLATILE/ $COPY_OF_WORLD
 fi
 
 if [ $(file $VOLATILE | awk -F' ' {'print $2'}) == directory ];
@@ -194,8 +196,8 @@ if [ "$V" == yes ]; then
 fi
 
 if [ "$V" == yes ];
-	then rm $WORLD/session.lock $WORLD_DIRNAME/server.log.lck $VOLATILE/session.lock  > $OUTPIPE
-	else rm -f $WORLD/session.lock $WORLD_DIRNAME/server.log.lck $VOLATILE/session.lock
+	then rm $COPY_OF_WORLD/session.lock $DIRNAME/server.log.lck $VOLATILE/session.lock  > $OUTPIPE
+	else rm -f $COPY_OF_WORLD/session.lock $DIRNAME/server.log.lck $VOLATILE/session.lock
 fi
 
 if [ "$V" == yes ]; then
@@ -221,20 +223,20 @@ if ! mkdir -p $WORLD_IN_RAM; then
 fi
 
 if [ "$V" == yes ]; then
-	echo "Copying $WORLD backup to $WORLD_IN_RAM." > $OUTPIPE
+	echo "Copying $COPY_OF_WORLD backup to $WORLD_IN_RAM." > $OUTPIPE
 fi
-cp -aR $WORLD/* $WORLD_IN_RAM/
+cp -aR $COPY_OF_WORLD/* $WORLD_IN_RAM/
 
 if [ "$V" == yes ]; then
-	echo "Entering directory $WORLD_DIRNAME."  > $OUTPIPE
+	echo "Entering directory $DIRNAME."  > $OUTPIPE
 fi
-cd $WORLD_DIRNAME
+cd $DIRNAME
 
 echo "Linking $VOLATILE to $WORLD_IN_RAM" > $OUTPIPE
 ln -s $WORLD_IN_RAM $VOLATILE
 
 if [ "$V" == yes ]; then
-	echo "Starting perminent minecraft world $WORLD with RAM link to $VOLATILE." > $OUTPIPE
+	echo "Starting perminent minecraft world $COPY_OF_WORLD with RAM link to $VOLATILE." > $OUTPIPE
 fi
 
 mkfifo $INPIPE
@@ -280,7 +282,7 @@ tail -f $INPIPE | $(
 	-Djava.net.preferIPv4Addresses \
 	-Dsun.io.useCanonCaches=false \
 	-Djsse.enableSNIExtension=false \
-	-jar $SERVER nogui >&5 2>&1;
+	-jar $SERVER_EXECUTABLE nogui >&5 2>&1;
 
 sleep 3
 # I HATE sleep statements but its needed to prevent file collisions. Minecraft or java will claim to be terminated when files are still being modified.
@@ -288,8 +290,8 @@ sleep 3
 if [ "$V" == yes ];
 	then
 		echo "Syncing RAM and permanent storage."
-		rsync -ravmP --delete "$WORLD_IN_RAM/" "$WORLD"
-	else rsync -ravPmq --delete "$WORLD_IN_RAM/" "$WORLD"
+		rsync -ravmP --delete "$WORLD_IN_RAM/" "$COPY_OF_WORLD"
+	else rsync -ravPmq --delete "$WORLD_IN_RAM/" "$COPY_OF_WORLD"
 fi
 #################rm -rf $VOLATILE # replaced by unlink command below.
 unlink $VOLATILE
@@ -318,7 +320,7 @@ JAVA_SUBSHELL_PID=$!;
 ########################
 sleep 5
 LEAD_PID=$$
-MCPID=$(pgrep -f $SERVER && sleep 1)
+MCPID=$(pgrep -f $SERVER_EXECUTABLE && sleep 1)
 sleep 1
 # MCPID needs to be padded with sleep statements or it becomes seriously unstable. I'm not too bothered by this;
 # it only gets called once.
@@ -363,7 +365,7 @@ while [ -d /proc/$JAVA_SUBSHELL_PID ];do
 		echo "save-all" > $INPIPE
 		echo "save-off" > $INPIPE
 		# Think about keeping saving on all the time and only disabling it immediately before a sync.
-		rsync -ravmq --delete "$WORLD_IN_RAM/" "$WORLD"
+		rsync -ravmq --delete "$WORLD_IN_RAM/" "$COPY_OF_WORLD"
 		echo "say RAM Sync complete." > $INPIPE
 	        PLAYERS=$( netstat -an  inet | grep $MCPORT | grep ESTABLISHED |  awk '{print $5}' |  awk -F: '{print $1}' );
 	        if [[ -n $PLAYERS ]]
@@ -392,7 +394,7 @@ while [ -d /proc/$JAVA_SUBSHELL_PID ];do
 	        echo "save-on" > $INPIPE
 	        echo "save-all" > $INPIPE
 	        echo "save-off" > $INPIPE
-	        rsync -ravmq --delete "$WORLD_IN_RAM/" "$WORLD"
+	        rsync -ravmq --delete "$WORLD_IN_RAM/" "$COPY_OF_WORLD"
 	        echo "say RAM Sync complete." > $INPIPE
 	        SIZE_IN_BYTES=$(du -s $BACKUP_PATH | awk '{ print $1 }');
 	        MAX_BYTE_SIZE=$((1000 * $MAX_BACKUP_PATH_SIZE_MB));
@@ -418,7 +420,7 @@ while [ -d /proc/$JAVA_SUBSHELL_PID ];do
 		unset existingbackups;
 		DATE=$(date +%Y-%m-%d-%Hh%M)
 	        BACKUP_FILENAME=$SERVER_PROPERTIES_WORLD-$DATE-full.tgz
-	        tar -czhf $BACKUP_PATH/$BACKUP_FILENAME $WORLD >/dev/null 2>&1
+	        tar -czhf $BACKUP_PATH/$BACKUP_FILENAME $COPY_OF_WORLD >/dev/null 2>&1
 #################	        rm -f $BACKUP_FULL_LINK
 	        ln -s $BACKUP_FILENAME $BACKUP_FULL_LINK
 		echo "say -Backup synchronization complete.-" > $INPIPE
