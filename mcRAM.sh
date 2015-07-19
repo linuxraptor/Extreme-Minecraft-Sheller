@@ -61,6 +61,10 @@ MAX_BACKUP_PATH_SIZE_MB=100
 # IF recovering from poor shutdown, do not touch anything.  Instead look for most recently modified world files, alert user, and quit.
 # Functions. And classes. And objects. And things that resemble a real program, not just a one-shot script.
 # Consider real logging method where all output is passed upwards but filtered last minute by designation.
+# Determine if double-brackets are always necessary in each conditional statement.
+# Finally, make a script to reconnect to lost minecraft sessions.
+	# If you run the script and minecraft is already running, exit.
+	# For a more advanced feature, prompt if user would like to reconnect to running session: (Y/n)?
 
 
 
@@ -69,8 +73,8 @@ MAX_BACKUP_PATH_SIZE_MB=100
 ##############################################################
 SERVER_PROPERTIES_WORLD=$(sed -ne 's/level-name=//p' $DIRNAME/server.properties)
 PIPE_SUFFIX=$(date --rfc-3339=ns | awk -F. '{print $2}').pipe
-INPIPE=input-to-minecraft-$PIPE_SUFFIX
-OUTPIPE=output-from-minecraft-$PIPE_SUFFIX
+INPIPE=$DIRNAME/input-to-minecraft-$PIPE_SUFFIX
+OUTPIPE=$DIRNAME/output-from-minecraft-$PIPE_SUFFIX
 
 mkfifo $OUTPIPE;
 
@@ -86,6 +90,8 @@ mkfifo $OUTPIPE;
 # if I experimented with exec further.
 # More info about exec here:
 # http://pubs.opengroup.org/onlinepubs/009604599/utilities/exec.html#tag_04_46_17
+# and here:
+# http://stackoverflow.com/questions/18351198/what-are-the-uses-of-the-exec-command-in-shell-scripts
 # More info about C-level proc calls here:
 # https://github.com/jerome-pouiller/reredirect
 exec 5<>$OUTPIPE;
@@ -129,14 +135,14 @@ fi
 
 COPY_OF_WORLD=$DIRNAME/world_storage
 
-SETTINGS=$(find $DIRNAME -name server.properties)
-# is find command necessary here? perhaps replace with $DIRNAME/server.properties and be done with it
-
 MINECRAFT_WORLD=$DIRNAME/$SERVER_PROPERTIES_WORLD
 
-WORLD_IN_RAM=/dev/shm/$SERVER_PROPERTIES_WORLD
+# We are going to place our RAM symlink on top of our minecraft world directory.
+# It is not necessary to copy the $MINECRAFT_WORLD variable but it makes
+# things more readable.
+MINECRAFT_WORLD_SYMLINK_TO_RAM=$MINECRAFT_WORLD
 
-TTY=$(tty)
+WORLD_IN_RAM=/dev/shm/$SERVER_PROPERTIES_WORLD
 
 BACKUP_FULL_LINK=${BACKUP_PATH}/${SERVER_PROPERTIES_WORLD}_full.tgz
 
@@ -151,12 +157,13 @@ if [[ ! -d $COPY_OF_WORLD  ]]; then
         fi
 fi
 
-if [[ ! -d $MINECRAFT_WORLD  ]]; then
-        if ! mkdir -p $MINECRAFT_WORLD; then
-                echo "$MINECRAFT_WORLD does not exist and I could not create the directory! Permissions maybe?"  > $OUTPIPE
-                exit 1 #FAIL :(
-        fi
-fi
+# This probably should not be trying to make a dir where the world might already exist.
+#if [[ ! -d $MINECRAFT_WORLD  ]]; then
+#        if ! mkdir -p $MINECRAFT_WORLD; then
+#                echo "$MINECRAFT_WORLD does not exist and I could not create the directory! Permissions maybe?"  > $OUTPIPE
+#                exit 1 #FAIL :(
+#        fi
+#fi
 
 if [[ ! -d $WORLD_IN_RAM  ]]; then
         if ! mkdir -p $WORLD_IN_RAM; then
@@ -173,7 +180,7 @@ if [[ ! -d $BACKUP_PATH  ]]; then
 fi
 
  if [ "$V" == yes ]; then
-	echo "Copying original world to perminent world storage." > $OUTPIPE
+	echo "Copying original world to $COPY_OF_WORLD." > $OUTPIPE
 fi
 
 if [ "$V" == yes ];
@@ -181,17 +188,20 @@ if [ "$V" == yes ];
 	else rsync -ravq $MINECRAFT_WORLD/ $COPY_OF_WORLD
 fi
 
-if [ $(file $MINECRAFT_WORLD | awk -F' ' {'print $2'}) == directory ];
+# Is this necessary? To have world_storage and this?
+
+#if [ $(file $MINECRAFT_WORLD | awk -F' ' {'print $2'}) == directory ];
 	# If minecraft is stopped correctly, "world" will be a directory. If not, it will still be a symlink.
 	# This looks at the filetype and determines if the old backups need to remain due to an incorrect termination.
-	then
-		OLD_BACKUPS=$MINECRAFT_WORLD"-backup-*" # I have to do this stupid shit because using the expression directly
-		rm -rf $OLD_BACKUPS              # in rm causes the wildcard to be ignored.
+#	then
+#		OLD_BACKUPS=$MINECRAFT_WORLD"-backup-*" # I have to do this stupid shit because using the expression directly
+#		rm -rf $OLD_BACKUPS              # in rm causes the wildcard to be ignored.
 #		mv $MINECRAFT_WORLD $MINECRAFT_WORLD"-backup-"$(date +%Y-%m-%d-%Hh%M)
-		 rsync -ravmP --delete --remove-source-files $MINECRAFT_WORLD $MINECRAFT_WORLD"-backup-"$(date +%Y-%m-%d-%Hh%M)
-	else
-		screen -wipe
-fi
+		# rsync -ravmPq --delete $MINECRAFT_WORLD $MINECRAFT_WORLD"-backup-"$(date +%Y-%m-%d-%Hh%M)
+#	else
+#		screen -wipe
+#fi
+
 if [ "$V" == yes ]; then
 	echo 'Removing any leftover lockfiles. (In case of destroyed process)' > $OUTPIPE
 fi
@@ -214,11 +224,12 @@ fi
 #############################################################################
 # Copy directly from "$WORLD" instead of "$COPY_OF_WORLD".
 if [ "$V" == yes ]; then
-	echo "Copying $COPY_OF_WORLD backup to $WORLD_IN_RAM." > $OUTPIPE
+	echo "Copying $MINECRAFT_WORLD to $WORLD_IN_RAM." > $OUTPIPE
 fi
-# Replace this with rsync.
-cp -aR $COPY_OF_WORLD/* $WORLD_IN_RAM/
+rsync -ravPmq $MINECRAFT_WORLD/* $WORLD_IN_RAM/
 
+
+# I dont think this is necessary either since we use fully-qualified filenames.
 if [ "$V" == yes ]; then
 	echo "Entering directory $DIRNAME."  > $OUTPIPE
 fi
@@ -231,10 +242,13 @@ cd $DIRNAME
 # We can unlink without consequence and the directory will appear once again.
 
 echo "Linking $MINECRAFT_WORLD to $WORLD_IN_RAM" > $OUTPIPE
-ln -s $WORLD_IN_RAM $MINECRAFT_WORLD
+#ln -s $WORLD_IN_RAM $MINECRAFT_WORLD_SYMLINK_TO_RAM
+# So it turns out that ln wont make a link over an existing directory
+# ...but mount will! 
+mount -o bind $WORLD_IN_RAM $MINECRAFT_WORLD_SYMLINK_TO_RAM
 
 if [ "$V" == yes ]; then
-	echo "Starting minecraft world $COPY_OF_WORLD with RAM link to $MINECRAFT_WORLD." > $OUTPIPE
+	echo "Starting minecraft world $COPY_OF_WORLD with RAM link to $MINECRAFT_WORLD_SYMLINK_TO_RAM." > $OUTPIPE
 fi
 
 mkfifo $INPIPE
@@ -290,22 +304,18 @@ if [ "$V" == yes ];
 		rsync -ravmP --delete "$WORLD_IN_RAM/" "$COPY_OF_WORLD"
 	else rsync -ravPmq --delete "$WORLD_IN_RAM/" "$COPY_OF_WORLD"
 fi
-unlink $MINECRAFT_WORLD
-if ! mkdir -p $MINECRAFT_WORLD; then
-        echo "Couldn't move perminent world back to original location. Permissions maybe?"
-        # exit 1; # Erroring out here is a BAD idea. This permission needs to be checked beforehand.
-fi
+#unlink $MINECRAFT_WORLD_SYMLINK_TO_RAM
+umount $MINECRAFT_WORLD_SYMLINK_TO_RAM
+
+# Now we can remove our world files in RAM.  We will do this with our
+# final rsync using --remove-source-files.
 if [ "$V" == yes ];
         then
 		echo "Restoring original world location"
-		rsync -ravm --delete $WORLD_IN_RAM/ $MINECRAFT_WORLD
-        else rsync -ravmq --delete $WORLD_IN_RAM/ $MINECRAFT_WORLD
+		rsync -ravm --delete --remove-source-files $WORLD_IN_RAM/ $MINECRAFT_WORLD
+        else rsync -ravmq --delete --remove-source-files $WORLD_IN_RAM/ $MINECRAFT_WORLD
 fi
 
-# Temp disabling deletions
-# I mean, is this really necessary? What if a ram sync failed?
-# We would be deleting the last remaining copy of the world.
-#################rm -rf $WORLD_IN_RAM
 echo "Original state restored." > $OUTPIPE
 
 kill -15 $(pgrep -f $INPIPE)
@@ -404,7 +414,7 @@ while [ -d /proc/$JAVA_SUBSHELL_PID ];do
 	        done
 	        while [[ $POTENTIAL_SIZE -gt $MAX_BYTE_SIZE && -n ${existingbackups[0]} ]]
 		        do
-#################	                rm ${existingbackups[0]};
+				rm ${existingbackups[0]};
 	                unset existingbackups[0];
 	                existingbackups=( "${existingbackups[@]}" );
 	                POTENTIAL_SIZE=$(($(du -s $BACKUP_PATH | awk '{ print $1 }') + $(du -s $WORLD_IN_RAM | awk '{ print $1 }')));
@@ -419,7 +429,7 @@ while [ -d /proc/$JAVA_SUBSHELL_PID ];do
 		DATE=$(date +%Y-%m-%d-%Hh%M)
 	        BACKUP_FILENAME=$SERVER_PROPERTIES_WORLD-$DATE-full.tgz
 	        tar -czhf $BACKUP_PATH/$BACKUP_FILENAME $COPY_OF_WORLD >/dev/null 2>&1
-#################	        rm -f $BACKUP_FULL_LINK
+		rm -f $BACKUP_FULL_LINK
 	        ln -s $BACKUP_FILENAME $BACKUP_FULL_LINK
 		echo "say -Backup synchronization complete.-" > $INPIPE
 		rm $BACKUP_SINCE_USER_CONNECTION
@@ -446,19 +456,17 @@ while [ -d /proc/$JAVA_SUBSHELL_PID ];do
 	fi
 done &
 
-TRACK_JAVA_SUBSHELL_PID=1;
-while [ $TRACK_JAVA_SUBSHELL_PID == 1 ]; do
+while true; do
         if [ -d /proc/$JAVA_SUBSHELL_PID ]; then
                 sleep 1;
         else
                 kill -15 $CATPID >/dev/null 2>&1;
 		rm $OUTPIPE;
-                TRACK_JAVA_SUBSHELL_PID=0;
+		exit;
         fi
 done &
 
-# This is clearly not working
+# Pump STDIN into our input pipeline
 while read input; do
-#	echo $input > $INPIPE
-	printf $input >> $INPIPE;
+	echo $input > $INPIPE
 done
