@@ -429,7 +429,7 @@ while [ -d /proc/$JAVA_SUBSHELL_PID ];do
 		DATE=$(date +%Y-%m-%d-%Hh%M)
 	        BACKUP_FILENAME=$SERVER_PROPERTIES_WORLD-$DATE-full.tgz
 	        tar -czhf $BACKUP_PATH/$BACKUP_FILENAME $COPY_OF_WORLD >/dev/null 2>&1
-		rm -f $BACKUP_FULL_LINK
+		unlink $BACKUP_FULL_LINK
 	        ln -s $BACKUP_FILENAME $BACKUP_FULL_LINK
 		echo "say -Backup synchronization complete.-" > $INPIPE
 		rm $BACKUP_SINCE_USER_CONNECTION
