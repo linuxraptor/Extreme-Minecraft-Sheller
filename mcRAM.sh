@@ -36,6 +36,10 @@ MAX_BACKUP_PATH_SIZE_MB=100
 #                          TODO                              #
 ##############################################################
 
+# Script is pretty intolerant to directories not existing yet.
+	# Need to make early rsync commands conditional. If source content exists, sync.
+	# Maybe necessary directory creation can be part of the permission checking array and loop.
+# Maybe make rsync options a variable? So all can be changed at once?
 # Revise variable names, many of them are redundant or do not make any sense.
 # Add more comments.
 # Bash trap "^C" to print "/stop" to minecraft for proper shutdown.
@@ -65,7 +69,9 @@ MAX_BACKUP_PATH_SIZE_MB=100
 # Finally, make a script to reconnect to lost minecraft sessions.
 	# If you run the script and minecraft is already running, exit.
 	# For a more advanced feature, prompt if user would like to reconnect to running session: (Y/n)?
-
+# The reason we need a function for things like creating a backup is so I can create a thread that looks like:
+	# Sleep for a while, check PID status, run_backup();.
+	# I have to call it in a few places already and it would be WAY easier this way.
 
 
 ##############################################################
@@ -184,8 +190,8 @@ fi
 fi
 
 if [ "$V" == yes ];
-	then rsync -rav $MINECRAFT_WORLD/ $COPY_OF_WORLD  > $OUTPIPE
-	else rsync -ravq $MINECRAFT_WORLD/ $COPY_OF_WORLD
+	then rsync -ravA $MINECRAFT_WORLD/ $COPY_OF_WORLD  > $OUTPIPE
+	else rsync -ravAq $MINECRAFT_WORLD/ $COPY_OF_WORLD
 fi
 
 # Is this necessary? To have world_storage and this?
@@ -206,10 +212,14 @@ if [ "$V" == yes ]; then
 	echo 'Removing any leftover lockfiles. (In case of destroyed process)' > $OUTPIPE
 fi
 
-if [ "$V" == yes ];
-	then rm $COPY_OF_WORLD/session.lock $DIRNAME/server.log.lck $MINECRAFT_WORLD/session.lock  > $OUTPIPE
-	else rm -f $COPY_OF_WORLD/session.lock $DIRNAME/server.log.lck $MINECRAFT_WORLD/session.lock
-fi
+# This used to be necessary.  Minecraft would leave lock files all over the place and error out
+# when a new session was created.  It seems lock files are still left all over the place by Minecraft
+# but it no longer cares.  Perhaps I should remove this, but I will leave it as long as Minecraft
+# is abondoning those files and not cleaning them up on termination.
+#if [ "$V" == yes ];
+#	then rm $COPY_OF_WORLD/session.lock $DIRNAME/server.log.lck $MINECRAFT_WORLD/session.lock  > $OUTPIPE
+#	else rm -f $COPY_OF_WORLD/session.lock $DIRNAME/server.log.lck $MINECRAFT_WORLD/session.lock
+#fi
 
 if [ "$V" == yes ]; then
 	echo 'Removing old symlinks. (In case of destroyed process)' > $OUTPIPE
@@ -226,7 +236,7 @@ fi
 if [ "$V" == yes ]; then
 	echo "Copying $MINECRAFT_WORLD to $WORLD_IN_RAM." > $OUTPIPE
 fi
-rsync -ravPmq $MINECRAFT_WORLD/* $WORLD_IN_RAM/
+rsync -ravAPq $MINECRAFT_WORLD/* $WORLD_IN_RAM/
 
 
 # I dont think this is necessary either since we use fully-qualified filenames.
@@ -293,34 +303,70 @@ tail -f $INPIPE | $(
 	-Djava.net.preferIPv4Addresses \
 	-Dsun.io.useCanonCaches=false \
 	-Djsse.enableSNIExtension=false \
-	-jar $SERVER_EXECUTABLE nogui >&5 2>&1;
+	-jar $SERVER_EXECUTABLE nogui >&$OUTPIPE 2>&1
+	#                              ^
+	# Redirects file descriptor 1 (STDOUT) to $OUTPIPE, then 2 (STDERR) to 1.
+	# This allows both STDOUT and STDERR to get piped into the $OUTPIPE.
+	# More info here: http://www.tldp.org/LDP/abs/html/io-redirection.html
 
-sleep 3
+# sleep 3 # idk what to do anymore, last rsyncs arent working.
+
+#while [ ! -n $(pgrep $SERVER_EXECUTABLE) ]; do
+#	if [ "$V" == yes ]; then
+#		echo "Waiting for minecraft to finish execution." > $OUTPIPE
+#	fi
+#	sleep 0.1;
+#done
+
 # I HATE sleep statements but its needed to prevent file collisions. Minecraft or java will claim to be terminated when files are still being modified.
+# Maybe that is a filesystem issue?
 # I spent a while lowering this as much as possible while retaining its dependability.
+# Might add future intelligence with "lsof" so we can allow this script to terminate faster.
 if [ "$V" == yes ];
 	then
-		echo "Syncing RAM and permanent storage."
-		rsync -ravmP --delete "$WORLD_IN_RAM/" "$COPY_OF_WORLD"
-	else rsync -ravPmq --delete "$WORLD_IN_RAM/" "$COPY_OF_WORLD"
+		echo "Syncing RAM and permanent storage." > $OUTPIPE
+		rsync -ravAP --delete "$WORLD_IN_RAM/" "$COPY_OF_WORLD" > $OUTPIPE
+	else rsync -ravAPq --delete "$WORLD_IN_RAM/" "$COPY_OF_WORLD" > $OUTPIPE
 fi
 #unlink $MINECRAFT_WORLD_SYMLINK_TO_RAM
-umount $MINECRAFT_WORLD_SYMLINK_TO_RAM
+# See above reasoning for changing this from a symlink to a mountpoint.
+umount $MINECRAFT_WORLD_SYMLINK_TO_RAM 
 
 # Now we can remove our world files in RAM.  We will do this with our
 # final rsync using --remove-source-files.
 if [ "$V" == yes ];
         then
-		echo "Restoring original world location"
-		rsync -ravm --delete --remove-source-files $WORLD_IN_RAM/ $MINECRAFT_WORLD
-        else rsync -ravmq --delete --remove-source-files $WORLD_IN_RAM/ $MINECRAFT_WORLD
+		echo "Restoring original world location" > $OUTPIPE
+		rsync -ravA --delete --remove-source-files $WORLD_IN_RAM/ $MINECRAFT_WORLD > $OUTPIPE
+        else rsync -ravAq --delete --remove-source-files $WORLD_IN_RAM/ $MINECRAFT_WORLD > $OUTPIPE
 fi
+
+# Backup old IFS before changing it.
+ORIGINAL_IFS=$IFS
+IFS=$'\n'
+# Delete (only) empty directories left in RAM. Trying to be as safe as possible.
+# The "sort -r" seems unnecessary but it has a purpose.
+# By default, "find" lists results from the shallowest depth and goes deeper.
+# We need to list directories in the deepest depth and get more shallow.
+# This way we dont try to remove any directories that contain subdirectories.
+for EMPTY_RAM_DIRECTORY in $(find $WORLD_IN_RAM/ -type d | sort -r)
+	do 
+	rmdir $EMPTY_RAM_DIRECTORY
+done
+IFS=$ORIGINAL_IFS
 
 echo "Original state restored." > $OUTPIPE
 
-kill -15 $(pgrep -f $INPIPE)
+# Kill the "tail" command connects the input pipe to minecraft.
+kill -15 $(pgrep -f "tail -f $INPIPE")
+# Delete the input pipe.
 rm $INPIPE
-kill -15 $$
+# Kill this thread. Although I doubt this is necessary, the subshell ends here anyways. 
+# Even if it didnt, an exit would probably suffice.
+#kill -15 $$; # fascinating, so the subshell doesnt die.
+# exit 0; # and an exit does not work!
+# kill it is then:
+# kill -15 $$; # There has to be a better way to do this.
 ) &
 JAVA_SUBSHELL_PID=$!;
 ########################
@@ -331,7 +377,7 @@ LEAD_PID=$$
 MCPID=$(pgrep -f $SERVER_EXECUTABLE && sleep 1)
 sleep 1
 # MCPID needs to be padded with sleep statements or it becomes seriously unstable. I'm not too bothered by this;
-# it only gets called once.
+# it only gets called once and it does not delay playability, just background threads.
 MCPORT=$( lsof -i 4 -a -p $MCPID | awk 'NR==2' | awk '{ print $(NF-1) }' |  awk -F':' '{ print $2 }' | awk -F'-' '{print $1}' )
 DATE=$(date +'%Y-%m-%d %X')
 CONNECTIONFILE=/tmp/$MCPID.status
@@ -373,7 +419,7 @@ while [ -d /proc/$JAVA_SUBSHELL_PID ];do
 		echo "save-all" > $INPIPE
 		echo "save-off" > $INPIPE
 		# Think about keeping saving on all the time and only disabling it immediately before a sync.
-		rsync -ravmq --delete "$WORLD_IN_RAM/" "$COPY_OF_WORLD"
+		rsync -ravAq --delete "$WORLD_IN_RAM/" "$COPY_OF_WORLD"
 		echo "say RAM Sync complete." > $INPIPE
 	        PLAYERS=$( netstat -an  inet | grep $MCPORT | grep ESTABLISHED |  awk '{print $5}' |  awk -F: '{print $1}' );
 	        if [[ -n $PLAYERS ]]
@@ -402,7 +448,7 @@ while [ -d /proc/$JAVA_SUBSHELL_PID ];do
 	        echo "save-on" > $INPIPE
 	        echo "save-all" > $INPIPE
 	        echo "save-off" > $INPIPE
-	        rsync -ravmq --delete "$WORLD_IN_RAM/" "$COPY_OF_WORLD"
+	        rsync -ravAq --delete "$WORLD_IN_RAM/" "$COPY_OF_WORLD"
 	        echo "say RAM Sync complete." > $INPIPE
 	        SIZE_IN_BYTES=$(du -s $BACKUP_PATH | awk '{ print $1 }');
 	        MAX_BYTE_SIZE=$((1000 * $MAX_BACKUP_PATH_SIZE_MB));
@@ -429,7 +475,7 @@ while [ -d /proc/$JAVA_SUBSHELL_PID ];do
 		DATE=$(date +%Y-%m-%d-%Hh%M)
 	        BACKUP_FILENAME=$SERVER_PROPERTIES_WORLD-$DATE-full.tgz
 	        tar -czhf $BACKUP_PATH/$BACKUP_FILENAME $COPY_OF_WORLD >/dev/null 2>&1
-		unlink $BACKUP_FULL_LINK
+		rm -f $BACKUP_FULL_LINK
 	        ln -s $BACKUP_FILENAME $BACKUP_FULL_LINK
 		echo "say -Backup synchronization complete.-" > $INPIPE
 		rm $BACKUP_SINCE_USER_CONNECTION
@@ -468,5 +514,11 @@ done &
 
 # Pump STDIN into our input pipeline
 while read input; do
-	echo $input > $INPIPE
+	if [ -d /proc/$JAVA_SUBSHELL_PID ]; then
+		# The main issue with this logic is that this loop requires a newline after program termination
+		# to check on the java subshell and realize it needs to exit.
+		echo $input > $INPIPE;
+	else
+		exit 0;
+	fi
 done
