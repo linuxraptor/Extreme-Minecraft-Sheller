@@ -2,14 +2,12 @@ HIGHLIGHTS:
 
 * No permanent changes to the system. Can switch between this script and any other minecraft startup method.
 * Large performance enhancements.
-* Automatic backups in several locations.
-* Automatic recovery in event of system failure.
-* Automatic retrieval of minecraft_server.jar.
+* Automatic backups.
 
 
 DEPENDENCIES:
 
-* 1GB of RAM
+* 4GB of RAM
 * Linux kernel 2.6.x or newer.
 * Java runtime environment of any kind (Sun JRE, Icedtea) later than 1.6
 
@@ -38,4 +36,6 @@ Upon system failure, the script can recover the minecraft server and world. Usin
 
 TODO:
 
-Automatic console redirection for lost shells (i.e., logout).
+* Automatic console redirection for lost shells (i.e., logout).
+* Automatic recovery in event of system failure.
+* Automatic retrieval of minecraft_server.jar.
