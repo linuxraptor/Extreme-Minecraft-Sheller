@@ -361,12 +361,10 @@ echo "Original state restored." > $OUTPIPE
 kill -15 $(pgrep -f "tail -f $INPIPE")
 # Delete the input pipe.
 rm $INPIPE
-# Kill this thread. Although I doubt this is necessary, the subshell ends here anyways. 
-# Even if it didnt, an exit would probably suffice.
-#kill -15 $$; # fascinating, so the subshell doesnt die.
-# exit 0; # and an exit does not work!
-# kill it is then:
-# kill -15 $$; # There has to be a better way to do this.
+# This exists to kill the "while read input" loop at the end of the script.
+# Currently it will only exit after the shell has terminated AND enter is pressed.
+# This is because "while read" is triggered at the end of each line processed.
+kill -15 $$;
 ) &
 JAVA_SUBSHELL_PID=$!;
 ########################
