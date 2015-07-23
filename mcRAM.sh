@@ -78,7 +78,7 @@ MAX_BACKUP_PATH_SIZE_MB=100
 ####        Don't Change Anything Below this point        ####
 ##############################################################
 SERVER_PROPERTIES_WORLD=$(sed -ne 's/level-name=//p' $DIRNAME/server.properties)
-PIPE_SUFFIX=$(date --rfc-3339=ns | awk -F. '{print $2}').pipe
+PIPE_SUFFIX=$(date +%F_%H:%M:%S.%N).pipe
 INPIPE=$DIRNAME/input-to-minecraft-$PIPE_SUFFIX
 OUTPIPE=$DIRNAME/output-from-minecraft-$PIPE_SUFFIX
 
@@ -100,11 +100,18 @@ mkfifo $OUTPIPE;
 # http://stackoverflow.com/questions/18351198/what-are-the-uses-of-the-exec-command-in-shell-scripts
 # More info about C-level proc calls here:
 # https://github.com/jerome-pouiller/reredirect
-exec 5<>$OUTPIPE;
+
+# "Using file descriptor 5 might cause problems. When Bash creates a child process, as with exec, the child inherits fd 5":
+# http://www.tldp.org/LDP/abs/html/io-redirection.html
+# exec 5<>$OUTPIPE; 
+
+exec 4<>$OUTPIPE;
 
 # Must be cat. While "tail" works printing information TO named pipes,
 # it does not work printing output FROM named pipes.
 # This command connects our minecraft output pipe to our TTY STDOUT.
+# I need to find a more intelligent way of terminating this.
+# This is the only thread in this program that cannot terminate itself intelligently.
 cat $OUTPIPE &
 
 # Now we record what PID to kill when the script is ending.
@@ -262,6 +269,7 @@ if [ "$V" == yes ]; then
 fi
 
 mkfifo $INPIPE
+
 ############################
 # BENNING of java subshell #
 ############################
@@ -309,25 +317,20 @@ tail -f $INPIPE | $(
 	# This allows both STDOUT and STDERR to get piped into the $OUTPIPE.
 	# More info here: http://www.tldp.org/LDP/abs/html/io-redirection.html
 
-# sleep 3 # idk what to do anymore, last rsyncs arent working.
+# This shouldnt be necessary but world files have been modified shortly after minecraft termination.
+# This ensures their safety before rsync. This only happens when minecraft is killed incorrectly.
+while [[ ! -z $(lsof +D $MINECRAFT_WORLD) ]]; do
+	sleep 0.1;
+	echo "Waiting for world files to be released." > $OUTPIPE
+done
 
-#while [ ! -n $(pgrep $SERVER_EXECUTABLE) ]; do
-#	if [ "$V" == yes ]; then
-#		echo "Waiting for minecraft to finish execution." > $OUTPIPE
-#	fi
-#	sleep 0.1;
-#done
-
-# I HATE sleep statements but its needed to prevent file collisions. Minecraft or java will claim to be terminated when files are still being modified.
-# Maybe that is a filesystem issue?
-# I spent a while lowering this as much as possible while retaining its dependability.
-# Might add future intelligence with "lsof" so we can allow this script to terminate faster.
 if [ "$V" == yes ];
 	then
 		echo "Syncing RAM and permanent storage." > $OUTPIPE
 		rsync -ravAP --delete "$WORLD_IN_RAM/" "$COPY_OF_WORLD" > $OUTPIPE
 	else rsync -ravAPq --delete "$WORLD_IN_RAM/" "$COPY_OF_WORLD" > $OUTPIPE
 fi
+
 #unlink $MINECRAFT_WORLD_SYMLINK_TO_RAM
 # See above reasoning for changing this from a symlink to a mountpoint.
 umount $MINECRAFT_WORLD_SYMLINK_TO_RAM 
@@ -359,8 +362,10 @@ echo "Original state restored." > $OUTPIPE
 
 # Kill the "tail" command connects the input pipe to minecraft.
 kill -15 $(pgrep -f "tail -f $INPIPE")
+
 # Delete the input pipe.
 rm $INPIPE
+
 # This exists to kill the "while read input" loop at the end of the script.
 # Currently it will only exit after the shell has terminated AND enter is pressed.
 # This is because "while read" is triggered at the end of each line processed.
@@ -370,20 +375,36 @@ JAVA_SUBSHELL_PID=$!;
 ########################
 # END of java subshell #
 ########################
-sleep 5
 LEAD_PID=$$
-MCPID=$(pgrep -f $SERVER_EXECUTABLE && sleep 1)
-sleep 1
+
+if [ "$V" == yes ]; then
+	echo "Waiting for java to claim a PID." > $OUTPIPE
+fi
+while [ -z $(printf "$(pgrep -f $SERVER_EXECUTABLE)") ]; do
+	sleep 0.1;
+done
+
+MCPID=$(pgrep -f $SERVER_EXECUTABLE)
 # MCPID needs to be padded with sleep statements or it becomes seriously unstable. I'm not too bothered by this;
 # it only gets called once and it does not delay playability, just background threads.
-MCPORT=$( lsof -i 4 -a -p $MCPID | awk 'NR==2' | awk '{ print $(NF-1) }' |  awk -F':' '{ print $2 }' | awk -F'-' '{print $1}' )
+
+if [ "$V" == yes ]; then
+	echo "Waiting for minecraft server to claim a port." > $OUTPIPE
+fi
+while [ -z $(lsof -i 4 -a -p $MCPID -P -Fn | sed -ne 's/^[^:]*://p') ]; do
+	sleep 0.1;
+done
+
+#MCPORT=$( lsof -i 4 -a -p $MCPID | awk 'NR==2' | awk '{ print $(NF-1) }' |  awk -F':' '{ print $2 }' | awk -F'-' '{print $1}' )
+MCPORT=$(lsof -i 4 -a -p $MCPID -P -Fn | sed -ne 's/^[^:]*://p')
 DATE=$(date +'%Y-%m-%d %X')
 CONNECTIONFILE=/tmp/$MCPID.status
-BACKUP_SINCE_USER_CONNECTION=/tmp/$MCPID.recentbackup
+BACKUP_SINCE_USER_CONNECTION=/tmp/$MCPID.needs_backup
 
 while [ -d /proc/$JAVA_SUBSHELL_PID ];do
    # connection check
-	PLAYERS=$( netstat -an  inet | grep $MCPORT | grep ESTABLISHED |  awk '{print $5}' |  awk -F: '{print $1}' );
+	#PLAYERS=$( netstat -an  inet | grep $MCPORT | grep ESTABLISHED |  awk '{print $5}' |  awk -F: '{print $1}' ); # This one returns the IP address of one player. Fun but unnecessary.
+	PLAYERS=$( netstat -an  inet | grep $MCPORT | grep ESTABLISHED );
 	if [[ -n $PLAYERS ]]
 	        then
 	        if [[ -a $CONNECTIONFILE ]]
@@ -466,14 +487,14 @@ while [ -d /proc/$JAVA_SUBSHELL_PID ];do
 	        if [[ ! -d $BACKUP_PATH  ]]; then
 	                if ! mkdir -p $BACKUP_PATH; then
 	                        echo "Backup path $BACKUP_PATH does not exist and I could not create the directory! Permissions maybe?" > $OUTPIPE
-	                        exit 1 #FAIL :(
+	                        # exit 1 # I am learning that my random exits are bad news.
 	                fi
 	        fi
 		unset existingbackups;
 		DATE=$(date +%Y-%m-%d-%Hh%M)
 	        BACKUP_FILENAME=$SERVER_PROPERTIES_WORLD-$DATE-full.tgz
 	        tar -czhf $BACKUP_PATH/$BACKUP_FILENAME $COPY_OF_WORLD >/dev/null 2>&1
-		rm -f $BACKUP_FULL_LINK
+		unlink $BACKUP_FULL_LINK
 	        ln -s $BACKUP_FILENAME $BACKUP_FULL_LINK
 		echo "say -Backup synchronization complete.-" > $INPIPE
 		rm $BACKUP_SINCE_USER_CONNECTION
@@ -500,6 +521,8 @@ while [ -d /proc/$JAVA_SUBSHELL_PID ];do
 	fi
 done &
 
+# I know, starting a new thread to watch over and terminate an old thread is dumb.
+# I am still looking for ways for the "cat" thread to maintain itself.
 while true; do
         if [ -d /proc/$JAVA_SUBSHELL_PID ]; then
                 sleep 1;
@@ -511,12 +534,15 @@ while true; do
 done &
 
 # Pump STDIN into our input pipeline
+# trap "echo \"Please don\'t.\n\"" SIGINT SIGTERM SIGHUP SIGABRT SIGKILL SIGQUIT SIGALRM; # A sad failed attempt to catch Control-C
+
 while read input; do
-	if [ -d /proc/$JAVA_SUBSHELL_PID ]; then
+#	if [ -d /proc/$JAVA_SUBSHELL_PID ]; then
 		# The main issue with this logic is that this loop requires a newline after program termination
 		# to check on the java subshell and realize it needs to exit.
 		echo $input > $INPIPE;
-	else
-		exit 0;
-	fi
+#	else
+#		exit 0;
+#	fi
 done
+
