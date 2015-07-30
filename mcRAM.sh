@@ -440,7 +440,8 @@ while [ -d /proc/$JAVA_SUBSHELL_PID ];do
 		# Think about keeping saving on all the time and only disabling it immediately before a sync.
 		rsync -ravAq --delete "$WORLD_IN_RAM/" "$COPY_OF_WORLD"
 		echo "say RAM Sync complete." > $INPIPE
-	        PLAYERS=$( netstat -an  inet | grep $MCPORT | grep ESTABLISHED |  awk '{print $5}' |  awk -F: '{print $1}' );
+	        # PLAYERS=$( netstat -an  inet | grep $MCPORT | grep ESTABLISHED |  awk '{print $5}' |  awk -F: '{print $1}' );
+	        PLAYERS=$( netstat -an  inet | grep $MCPORT | grep ESTABLISHED );
 	        if [[ -n $PLAYERS ]]
 	                then
 	                CONNECTION==1 # Unnecessary because of connected.status file, but neat to see live output
@@ -509,7 +510,11 @@ while [ -d /proc/$JAVA_SUBSHELL_PID ];do
 	                fi
 	        done
 
-	else
+	else    # There are two wait loops on purpose.
+		# If a player has recently connected, make backups and wait a few min.
+		# Else, just wait and check back in a few min.
+		# Both require waits.
+
 	        # This could be cleaned up, no need for PID checks at the beginning AND end of the loop.
 	        SECONDS_TO_SLEEP=10800;
 	        for (( i=0; i<$SECONDS_TO_SLEEP; i++ )); do
@@ -546,3 +551,72 @@ while read input; do
 #	fi
 done
 
+
+
+
+
+
+#########################################################
+#  Functions                                            #
+#########################################################
+
+# I am still deciding what should be a function, or how small each function should be.
+
+
+# I have to trim this down to only measure file size and create backup.
+# Should inlcude safety check for enough space left in folder/device,
+#  clean up variable names to be more consistent, check that there are some
+#  backups remaining so that one large backup from an unexpectedly grown map
+#  does not wipe out all other existing backups, and see if there is a way to 
+#  guess tar-gzipped map backup file size.
+# Perhaps make an option to use 7z.
+create_backup() {
+
+	# Is this really necessary? Maybe I should just call the sync function.
+        echo "save-on" > $INPIPE
+        echo "save-all" > $INPIPE
+        echo "save-off" > $INPIPE
+        rsync -ravAq --delete "$WORLD_IN_RAM/" "$COPY_OF_WORLD"
+        echo "say RAM Sync complete." > $INPIPE
+
+	# Start calculating backup size
+        SIZE_IN_BYTES=$(du -s $BACKUP_PATH | awk '{ print $1 }');
+        MAX_BYTE_SIZE=$((1000 * $MAX_BACKUP_PATH_SIZE_MB));
+	# Add minecraft world size to current backup folder size.
+        POTENTIAL_SIZE=$(($(du -s $BACKUP_PATH | awk '{ print $1 }') + $(du -s $MINECRAFT_WORLD | awk '{ print $1 }')));
+	# Build array of existing backups.
+        declare -a existingbackups
+        for f in $(echo $(find $BACKUP_PATH -size +1M | sort -g))
+	        do
+                existingbackups=( "${existingbackups[@]}" "$f" );
+        done
+	# If our new backup wont fit, remove backups (in chronological order, starting with the oldest) until it does.
+        while [[ $POTENTIAL_SIZE -gt $MAX_BYTE_SIZE && -n ${existingbackups[0]} ]]
+	        do
+			rm ${existingbackups[0]};
+                unset existingbackups[0];
+		# You cant just remove an array element and move on, it will leave a NULL element in the array.
+		# We have to redeclare the array, it will automically create one element per delimited and existing (not null) string.
+                existingbackups=( "${existingbackups[@]}" );
+                POTENTIAL_SIZE=$(($(du -s $BACKUP_PATH | awk '{ print $1 }') + $(du -s $WORLD_IN_RAM | awk '{ print $1 }')));
+        done
+        if [[ ! -d $BACKUP_PATH  ]]; then
+                if ! mkdir -p $BACKUP_PATH; then
+                        echo "Backup path $BACKUP_PATH does not exist and I could not create the directory! Permissions maybe?" > $OUTPIPE
+                        # exit 1 # I am learning that my random exits are bad news.
+                fi
+        fi
+	unset existingbackups;
+	DATE=$(date +%Y-%m-%d-%Hh%M)
+        BACKUP_FILENAME=$SERVER_PROPERTIES_WORLD-$DATE-full.tgz
+	# Piping this to dev-null is probably not a good idea. We want to see errors.
+        tar -czhf $BACKUP_PATH/$BACKUP_FILENAME $COPY_OF_WORLD >/dev/null 2>&1
+	if [ -h $BACKUP_FULL_LINK ]; then
+		unlink $BACKUP_FULL_LINK
+	fi
+	ln -s $BACKUP_FILENAME $BACKUP_FULL_LINK
+	echo "say -Backup synchronization complete.-" > $INPIPE
+	rm $BACKUP_SINCE_USER_CONNECTION
+	# This seems misplaced?
+	renice -n -10 -p $MCPID >/dev/null 2>&1
+}
