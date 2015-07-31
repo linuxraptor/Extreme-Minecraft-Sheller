@@ -570,7 +570,7 @@ done
 #  does not wipe out all other existing backups, and see if there is a way to 
 #  guess tar-gzipped map backup file size.
 # Perhaps make an option to use 7z.
-create_backup() {
+function create_backup() {
 
 	# Is this really necessary? Maybe I should just call the sync function.
         echo "save-on" > $INPIPE
@@ -619,4 +619,45 @@ create_backup() {
 	rm $BACKUP_SINCE_USER_CONNECTION
 	# This seems misplaced?
 	renice -n -10 -p $MCPID >/dev/null 2>&1
+}
+
+function ram_to_drive_sync() {
+	# Simple dumb sync.
+	echo "save-on" > $INPIPE
+	echo "save-all" > $INPIPE
+	echo "save-off" > $INPIPE
+	# Think about keeping saving on all the time and only disabling it immediately before a sync.
+	rsync -ravAq --delete "$WORLD_IN_RAM/" "$COPY_OF_WORLD"
+	echo "say RAM Sync complete." > $INPIPE
+}
+
+function pause() {
+	# Given a number of seconds, sleep while watching main PID.
+	
+	if [ -z "$1" ]; then
+		die "Pause time not given.";
+	fi;
+
+	SECONDS_TO_SLEEP=$1;
+	for (( i=0; i<$SECONDS_TO_SLEEP; i++ )); do
+	        sleep 1;
+	        if [ -d /proc/$JAVA_SUBSHELL_PID ]; then
+	                exit 0;
+	        fi;
+	done;
+
+}
+
+function die() {
+	# Similar to perl die function.
+	# Inspired by Sergey Irisov:
+	# http://stackoverflow.com/questions/7868818
+	local DIE_ARG=$1;
+	local ERROR_MESSAGE="";
+	
+	if [ -n "$DIE_ARG" ]; then
+	        ERROR_MESSAGE=": \"$DIE_ARG\"";
+	fi
+	echo "ERROR: ${BASH_SOURCE[1]}: ${FUNCNAME[1]}(): line ${BASH_LINENO[0]} $ERROR_MESSAGE" >&2;
+	exit 1;
 }
