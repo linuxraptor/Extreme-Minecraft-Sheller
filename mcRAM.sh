@@ -649,15 +649,17 @@ function pause() {
 }
 
 function die() {
-	# Similar to perl die function.
-	# Inspired by Sergey Irisov:
-	# http://stackoverflow.com/questions/7868818
-	local DIE_ARG=$1;
-	local ERROR_MESSAGE="";
-	
-	if [ -n "$DIE_ARG" ]; then
-	        ERROR_MESSAGE=": \"$DIE_ARG\"";
-	fi
-	echo "ERROR: ${BASH_SOURCE[1]}: ${FUNCNAME[1]}(): line ${BASH_LINENO[0]} $ERROR_MESSAGE" >&2;
-	exit 1;
+        # Similar to perl die function.
+        # Inspired by Sergey Irisov:
+        # http://stackoverflow.com/questions/7868818
+        # http://tldp.org/LDP/Bash-Beginners-Guide/html/sect_03_02.html
+
+        if [ -n "$1" ]; then
+                local ERROR_MESSAGE=": $1";
+        else
+                local ERROR_MESSAGE=": Error. Exiting.";
+        fi
+        echo "${BASH_SOURCE[1]}: line ${BASH_LINENO[0]}: ${FUNCNAME[1]}()$ERROR_MESSAGE" >&2;
+        exit 1;
 }
+
