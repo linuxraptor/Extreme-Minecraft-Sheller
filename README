@@ -1,3 +1,17 @@
+This script is being entirely rewritten.  Current code experimental only and its use is NOT recommended.
+
+Details on this script's infancy:
+* The current RAM sync is the first thing being rewritten.
+  It is dangerous.  It sometimes erases all the minecraft data in the folder.
+* The original script moved the world to a new location, but this was not
+  really a "backup" considering it was the only location that world existed.
+* When the world really balloons in size (like if someone walks in one direction
+  for several days), a single large .tar.gz backup can wipe out all of the other
+  backups in your folder with no sanity check whatsoever.
+* Really, don't use this script.
+
+
+
 HIGHLIGHTS:
 
 * No permanent changes to the system. Can switch between this script and any other minecraft startup method.
@@ -7,9 +21,8 @@ HIGHLIGHTS:
 
 DEPENDENCIES:
 
-* 4GB of RAM
-* Linux kernel 2.6.x or newer.
-* Java runtime environment of any kind (Sun JRE, Icedtea) later than 1.6
+* Linux kernel 2.6.x or newer with dev/shm support (for world file caching to RAM).
+* Oracle Java runtime environment 1.8 or newer (for G1 garbage collection).
 
 
 WHAT'S THE BIG IDEA?
@@ -18,20 +31,20 @@ WHAT'S THE BIG IDEA?
 
 The need for simplicity drove me to write this script; I wanted a script that I could run and not worry about editing all kinds of variables or remembering long java commands for optimization.
 
-No bullshit. Just a working script that manages, well, everything. ... Automatically.
+No bullshit. Just a working script that manages everything automatically.
 
 
 WHAT DOES IT DO?
 
-It copies the contents of your minecraft world into RAM and runs the minecarft server from there.
+It can copy the contents of your minecraft world into RAM and runs the minecarft server from there.
 
-This offers a pretty extreme performance increse. Instead of spending expensive hard drive seeking and reading time trying to report to your users, the world stored in RAM reports to minecraft via a symlink. 
+This offers a pretty extreme performance increse. Instead of spending expensive hard drive seeking and reading time trying to report to your users, the world stored in RAM reports to minecraft using a crafty mountpoint. 
 
-The RAM syncronizes deltas to the hard drive folder only when users have visited, saving precious read-write cycles on solid-state devices while also allowing several safety mechanisms for power failure or system crashes.
+This script rsyncs deltas to the hard drive folder only when users have visited, saving precious read-write cycles on solid-state devices.
 
 When the script is halted softly by entering "stop" into minecraft, it leaves the minecraft world files on the hard drive such that minecraft can be started vallila-style (java -jar minecarft_server.jar).
 
-Upon system failure, the script can recover the minecraft server and world. Using several automatic backup systems, no information is ever lost beyond 4 minutes and 56 seconds.
+Upon system failure, the script can recover the minecraft server and world. Using automatic backups, no information should be lost beyond 4 minutes and 56 seconds.
 
 
 TODO:
@@ -39,3 +52,4 @@ TODO:
 * Automatic console redirection for lost shells (i.e., logout).
 * Automatic recovery in event of system failure.
 * Automatic retrieval of minecraft_server.jar.
+* Literally tons of other stuff that I have ranted about in the scripts stored here.
