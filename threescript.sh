@@ -25,6 +25,8 @@
 #      BASH_LINENO array was printed out with the stack trace, to have an immediate in-depth
 #      view of possible erroneous syntax.
 
+DEBUG=0;
+
 function run_test() {
 	trap '
 		# The PIPESTATUS array is overwritten by any action.
@@ -75,6 +77,11 @@ function die() {
 		else
 			printf "\n";
 		fi;
+		
+		if [ $DEBUG -eq 1 ] && [ ${BASH_LINENO[$i-1]} -ne ${BASH_LINENO[0]} ]; then
+			printf "\t    \"$(tail -n+${BASH_LINENO[$i-1]} ${BASH_SOURCE[$i]} | head -n 1 | sed -e 's/^\s*//g')\"\n";
+		fi
+
 		((FRAME_COUNTER++));
 	done);
 	ERROR_STRING+=":\n\t   \"$RECEIVED_ERROR_MESSAGE\"\n";
@@ -117,7 +124,12 @@ function wrapper_function_four() {
 }
 
 if [[ $@ == "rsync_test" ]]; then
+	DEBUG=1;
 	wrapper_function_one;
+elif [[ $@ == "pause" ]]; then
+	pause 3;
+elif [[ $@ == "--debug" ]]; then
+	DEBUG=1;
 else
 	echo "Next time...";
 fi
